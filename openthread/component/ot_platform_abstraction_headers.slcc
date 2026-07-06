@@ -19,6 +19,7 @@ include:
   - path: platform-band.h
   - path: radio_channel_switching.h
   - path: radio_csl.h
+  - path: radio_direct.h
   - path: radio_energy_scan.hpp
   - path: radio_events.h
   - path: radio_interface.h

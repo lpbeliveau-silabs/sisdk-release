@@ -40,6 +40,7 @@
 #include <openthread/platform/crypto.h>
 #include <openthread/platform/diag.h>
 #include <openthread/platform/radio.h>
+#include <openthread/platform/thread_direct.h>
 
 #include "common/locator.hpp"
 #include "common/non_copyable.hpp"
@@ -64,7 +65,7 @@ static constexpr uint64_t kMinCslPeriod  = OPENTHREAD_CONFIG_MAC_CSL_MIN_PERIOD 
 static constexpr uint64_t kMaxCslTimeout = OPENTHREAD_CONFIG_MAC_CSL_MAX_TIMEOUT;
 #endif
 
-#if OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
 /**
  * Minimum wake-up listen duration supported in microseconds.
  */
@@ -376,6 +377,65 @@ public:
                    const Mac::KeyMaterial &aCurrKey,
                    const Mac::KeyMaterial &aNextKey);
 
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    /**
+     * Registers or removes a Thread Direct Wake Key at the given key index on the radio platform.
+     *
+     * @param[in] aKeyIndex  Key index (OT_MAC_FRAME_WAKE_KEY_INDEX for default, 130-192 for guest).
+     * @param[in] aWakeKey   Key material, or nullptr to remove the key at @p aKeyIndex.
+     */
+    void SetWakeKey(uint8_t aKeyIndex, const Mac::KeyMaterial *aWakeKey)
+    {
+        otPlatRadioSetWakeKey(GetInstancePtr(), aKeyIndex, aWakeKey);
+    }
+
+    /**
+     * Retrieves the current Radio Availability Mask (RAM) parameters from the platform radio driver.
+     *
+     * @param[out] aParams  Filled with current CoEx constraints.
+     *
+     * @retval kErrorNone            @p aParams populated.
+     * @retval kErrorNotImplemented  Feature is not implemented.
+     */
+    Error GetThreadDirectRamParams(otThreadDirectRamParams &aParams);
+#endif // OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    /**
+     * Programs the platform with the local SLW period and RAM offset.
+     *
+     * @param[in] aSlwPeriod   SLW period in 160 us slots (0 = disable).
+     * @param[in] aRamOffsetUs RAM offset in [-1024, 1023] us.
+     *
+     * @retval kErrorNone            Schedule updated.
+     * @retval kErrorNotImplemented  Feature is not implemented.
+     */
+    Error SetThreadDirectSlwSchedule(uint16_t aSlwPeriod, int16_t aRamOffsetUs);
+
+    /**
+     * Updates the next SLW sample time used for SCA LTV phase computation.
+     *
+     * @param[in] aSlwSampleTime  Next expected sample time in us.
+     */
+    void UpdateThreadDirectSlwSampleTime(uint32_t aSlwSampleTime);
+#endif // OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || WAKE_LISTENER_ENABLE
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+    /**
+     * Returns the worst-case clock accuracy in PPM for Thread Direct SLW scheduling.
+     *
+     * @returns Worst-case clock accuracy in PPM.
+     */
+    uint8_t GetThreadDirectSlwAccuracy(void);
+
+    /**
+     * Returns the fixed arrival-time uncertainty for Thread Direct SLW frames in units of 10 us.
+     *
+     * @returns SLW arrival-time uncertainty in units of 10 us.
+     */
+    uint8_t GetThreadDirectSlwUncertainty(void);
+#endif // OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+
     /**
      * Sets the current MAC Frame Counter value.
      *
@@ -512,7 +572,7 @@ public:
      */
     Error Receive(uint8_t aChannel);
 
-#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE || OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
+#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
     /**
      * Schedules a radio reception window at a specific time and duration.
      *
@@ -559,8 +619,9 @@ public:
     Error ResetCsl(void);
 #endif // OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
 
-#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE || OPENTHREAD_CONFIG_MAC_CSL_TRANSMITTER_ENABLE || \
-    OPENTHREAD_CONFIG_TIME_SYNC_ENABLE
+#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE || OPENTHREAD_CONFIG_MAC_CSL_TRANSMITTER_ENABLE ||   \
+    OPENTHREAD_CONFIG_TIME_SYNC_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || \
+    OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
     /**
      * Get the current radio time in microseconds referenced to a continuous monotonic local radio clock (64 bits
      * width).
@@ -568,7 +629,11 @@ public:
      * @returns The current radio clock time.
      */
     uint64_t GetNow(void);
+#endif // OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE || OPENTHREAD_CONFIG_MAC_CSL_TRANSMITTER_ENABLE ||
+       // OPENTHREAD_CONFIG_TIME_SYNC_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE ||
+       // OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
 
+#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE || OPENTHREAD_CONFIG_MAC_CSL_TRANSMITTER_ENABLE
     /**
      * Get the current accuracy, in units of ± ppm, of the clock used for scheduling CSL operations.
      *
@@ -983,7 +1048,7 @@ inline Error Radio::Receive(uint8_t aChannel)
     return otPlatRadioReceive(GetInstancePtr(), aChannel);
 }
 
-#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE || OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
+#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
 inline Error Radio::ReceiveAt(uint8_t aChannel, uint32_t aStart, uint32_t aDuration)
 {
     Error error = otPlatRadioReceiveAt(GetInstancePtr(), aChannel, aStart, aDuration);
@@ -1011,14 +1076,48 @@ inline Error Radio::EnableCsl(uint32_t aCslPeriod, Mac::ShortAddress aShortAddr,
 inline Error Radio::ResetCsl(void) { return otPlatRadioResetCsl(GetInstancePtr()); }
 #endif
 
-#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE || OPENTHREAD_CONFIG_MAC_CSL_TRANSMITTER_ENABLE || \
-    OPENTHREAD_CONFIG_TIME_SYNC_ENABLE
+#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE || OPENTHREAD_CONFIG_MAC_CSL_TRANSMITTER_ENABLE ||   \
+    OPENTHREAD_CONFIG_TIME_SYNC_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || \
+    OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
 inline uint64_t Radio::GetNow(void) { return otPlatRadioGetNow(GetInstancePtr()); }
+#endif
 
+#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE || OPENTHREAD_CONFIG_MAC_CSL_TRANSMITTER_ENABLE
 inline uint8_t Radio::GetCslAccuracy(void) { return otPlatRadioGetCslAccuracy(GetInstancePtr()); }
 
 inline uint8_t Radio::GetCslUncertainty(void) { return otPlatRadioGetCslUncertainty(GetInstancePtr()); }
 #endif
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+inline Error Radio::GetThreadDirectRamParams(otThreadDirectRamParams &aParams)
+{
+    return otPlatRadioGetThreadDirectRamParams(GetInstancePtr(), &aParams);
+}
+#endif
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+inline Error Radio::SetThreadDirectSlwSchedule(uint16_t aSlwPeriod, int16_t aRamOffsetUs)
+{
+    return otPlatRadioSetThreadDirectSlwSchedule(GetInstancePtr(), aSlwPeriod, aRamOffsetUs);
+}
+
+inline void Radio::UpdateThreadDirectSlwSampleTime(uint32_t aSlwSampleTime)
+{
+    otPlatRadioUpdateThreadDirectSlwSampleTime(GetInstancePtr(), aSlwSampleTime);
+}
+#endif // OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || WAKE_LISTENER_ENABLE
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+inline uint8_t Radio::GetThreadDirectSlwAccuracy(void)
+{
+    return otPlatRadioGetThreadDirectSlwAccuracy(GetInstancePtr());
+}
+
+inline uint8_t Radio::GetThreadDirectSlwUncertainty(void)
+{
+    return otPlatRadioGetThreadDirectSlwUncertainty(GetInstancePtr());
+}
+#endif // OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
 
 inline Mac::TxFrame &Radio::GetTransmitBuffer(void)
 {
@@ -1107,7 +1206,7 @@ inline Error Radio::Sleep(void) { return kErrorNone; }
 
 inline Error Radio::Receive(uint8_t) { return kErrorNone; }
 
-#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE || OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
+#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
 inline Error Radio::ReceiveAt(uint8_t, uint32_t, uint32_t) { return kErrorNone; }
 #endif
 
@@ -1119,14 +1218,33 @@ inline Error Radio::EnableCsl(uint32_t, Mac::ShortAddress, const Mac::ExtAddress
 inline Error Radio::ResetCsl(void) { return kErrorNotImplemented; }
 #endif
 
-#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE || OPENTHREAD_CONFIG_MAC_CSL_TRANSMITTER_ENABLE || \
-    OPENTHREAD_CONFIG_TIME_SYNC_ENABLE
+#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE || OPENTHREAD_CONFIG_MAC_CSL_TRANSMITTER_ENABLE ||   \
+    OPENTHREAD_CONFIG_TIME_SYNC_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || \
+    OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
 inline uint64_t Radio::GetNow(void) { return NumericLimits<uint64_t>::kMax; }
+#endif
 
+#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE || OPENTHREAD_CONFIG_MAC_CSL_TRANSMITTER_ENABLE
 inline uint8_t Radio::GetCslAccuracy(void) { return NumericLimits<uint8_t>::kMax; }
 
 inline uint8_t Radio::GetCslUncertainty(void) { return NumericLimits<uint8_t>::kMax; }
 #endif
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+inline Error Radio::GetThreadDirectRamParams(otThreadDirectRamParams &) { return kErrorNotImplemented; }
+#endif
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+inline Error Radio::SetThreadDirectSlwSchedule(uint16_t, int16_t) { return kErrorNotImplemented; }
+
+inline void Radio::UpdateThreadDirectSlwSampleTime(uint32_t) {}
+#endif // OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || WAKE_LISTENER_ENABLE
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+inline uint8_t Radio::GetThreadDirectSlwAccuracy(void) { return NumericLimits<uint8_t>::kMax; }
+
+inline uint8_t Radio::GetThreadDirectSlwUncertainty(void) { return NumericLimits<uint8_t>::kMax; }
+#endif // OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
 
 inline Mac::TxFrame &Radio::GetTransmitBuffer(void)
 {

@@ -34,6 +34,7 @@
 
 #include "radio_channel_switching.h"
 #include "radio_csl.h"
+#include "radio_direct.h"
 #include "radio_energy_scan.hpp"
 #include "radio_events.h"
 #include "radio_instance.h"
@@ -186,6 +187,22 @@ sl_rail_csma_config_t cslCsmaConfig = SL_RAIL_CSMA_CONFIG_SINGLE_CCA;
 
 #define SCHEDULE_TX_DELAY_US 3000
 
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+// Set the post-TX state transition for the RAIL state machine.
+// Pass true to go Idle after TX (WI wake burst — no ACK expected, save time by not transitioning to RX).
+// Pass false to restore the default TX->RX transition for normal operation.
+SL_CODE_CLASSIFY(SL_CODE_COMPONENT_OT_PLATFORM_ABSTRACTION, SL_CODE_CLASS_TIME_CRITICAL)
+static inline void setRadioTxToIdleOrRxTransition(bool aIdle)
+{
+    sl_rail_state_transitions_t transitions;
+    sl_rail_radio_state_t       nextState = aIdle ? SL_RAIL_RF_STATE_IDLE : SL_RAIL_RF_STATE_RX;
+
+    transitions.success = nextState;
+    transitions.error   = nextState;
+    OT_UNUSED_VARIABLE(sl_rail_set_tx_transitions(sli_ot_radio_interface_get_rail_handle(), &transitions));
+}
+#endif // OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+
 #if OPENTHREAD_CONFIG_MAC_HEADER_IE_SUPPORT
 static otRadioIeInfo sTransmitIeInfo[RADIO_REQUEST_BUFFER_COUNT];
 #endif
@@ -264,8 +281,11 @@ static bool isFilterMaskValid(uint8_t mask)
 
 #if (OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2)
 
-// Enhanced ACK IE data
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+static uint8_t sAckIeData[OT_ACK_IE_MAX_SIZE + SLI_OT_RADIO_DIRECT_ENH_ACK_IE_MAX_SIZE];
+#else
 static uint8_t sAckIeData[OT_ACK_IE_MAX_SIZE];
+#endif
 static uint8_t sAckIeDataLength = 0;
 
 SL_CODE_CLASSIFY(SL_CODE_COMPONENT_OT_PLATFORM_ABSTRACTION, SL_CODE_CLASS_TIME_CRITICAL)
@@ -294,6 +314,15 @@ static uint8_t generateAckIeData(otInstance   *aInstance,
     }
 #endif
 
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+    {
+        uint8_t available = (uint8_t)(sizeof(sAckIeData) - offset);
+
+        offset +=
+            sli_ot_radio_direct_generate_enh_ack_ie_data(aInstance, aReceivedFrame, sAckIeData + offset, available);
+    }
+#endif
+
 exit:
     return offset;
 }
@@ -310,8 +339,7 @@ static uint8_t readInitialPacketData(sl_rail_rx_packet_info_t *packetInfo,
     uint8_t                  packetBytesRead = 0;
     sl_rail_rx_packet_info_t adjustedPacketInfo;
 
-    // Check if we have enough buffer
-    OT_ASSERT((buffer_len >= expected_data_bytes_max) || (packetInfo != nullptr));
+    OT_ASSERT(buffer_len >= expected_data_bytes_max);
 
     // Read the packet info
     sli_ot_radio_interface_rail_get_rx_incoming_packet_info(packetInfo);
@@ -1532,6 +1560,15 @@ otError otPlatRadioTransmit(otInstance *aInstance, otRadioFrame *aFrame)
         error = sli_ot_radio_interface_load_channel_config(aFrame->mChannel, txPower);
         otEXPECT(error == OT_ERROR_NONE);
 
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+        // TD Wake Commands are burst-transmitted without ACK. Switch to TX->Idle so RAIL goes
+        // idle immediately after each frame instead of waiting for an ACK receive window.
+        if (otMacFrameIsTdWakeCommand(aFrame))
+        {
+            setRadioTxToIdleOrRxTransition(true);
+        }
+#endif
+
         OT_ASSERT(!sli_ot_radio_state_is_tx_data_ongoing());
 
         sli_ot_radio_state_clear_all_tx_events();
@@ -1560,7 +1597,9 @@ otError otPlatRadioTransmit(otInstance *aInstance, otRadioFrame *aFrame)
 
         // Note - we need to call this outside of txCurrentPacket as for Series 2,
         // this results in calling the SE interface from a critical section which is not permitted.
-        (void)sli_ot_radio_security_process_transmit(&sCurrentTxPacket->frame, sCurrentTxPacket->instance);
+        otEXPECT_ACTION(sli_ot_radio_security_process_transmit(&sCurrentTxPacket->frame, sCurrentTxPacket->instance)
+                            == OT_ERROR_NONE,
+                        error = OT_ERROR_SECURITY);
 #endif // OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
 
         CORE_DECLARE_IRQ_STATE;
@@ -1571,10 +1610,22 @@ otError otPlatRadioTransmit(otInstance *aInstance, otRadioFrame *aFrame)
 
         if (sli_ot_radio_state_has_tx_failed())
         {
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+            if (otMacFrameIsTdWakeCommand(aFrame))
+            {
+                setRadioTxToIdleOrRxTransition(false);
+            }
+#endif
             otPlatRadioTxStarted(aInstance, aFrame);
         }
     }
 exit:
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+    if (error != OT_ERROR_NONE && otMacFrameIsTdWakeCommand(aFrame))
+    {
+        setRadioTxToIdleOrRxTransition(false);
+    }
+#endif
     return error;
 }
 
@@ -1901,6 +1952,9 @@ void otPlatRadioSetMacFrameCounterIfLarger(otInstance *aInstance, uint32_t aMacF
 {
     sli_ot_radio_security_set_mac_frame_counter_if_larger(aInstance, aMacFrameCounter);
 }
+
+// Thread Direct platform APIs (otPlatRadioSetWakeKey + platform/thread_direct.h stubs)
+// are implemented in radio_direct.cpp.
 #endif // (OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2)
 
 #if (OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2)
@@ -1930,6 +1984,8 @@ static bool writeIeee802154EnhancedAck(sl_rail_handle_t          aRailHandle,
     otRadioFrame receivedFrame, enhAckFrame;
     uint8_t      enhAckPsdu[IEEE802154_MAX_LENGTH];
 
+// Thread Direct:
+// Challenge LTV needs to be extracted, which always lands within these bytes.
 #define EARLY_FRAME_PENDING_EXPECTED_BYTES (2U + 2U + 1U + 2U + 8U + 2U + 8U + 14U)
 #define FINAL_PACKET_LENGTH_WITH_IE (EARLY_FRAME_PENDING_EXPECTED_BYTES + OT_ACK_IE_MAX_SIZE)
 
@@ -1944,7 +2000,7 @@ static bool writeIeee802154EnhancedAck(sl_rail_handle_t          aRailHandle,
     otEXPECT((packetInfoForEnhAck != nullptr) && (initialPktReadBytes != nullptr) && (receivedPsdu != nullptr));
 
     *initialPktReadBytes = readInitialPacketData(packetInfoForEnhAck,
-                                                 EARLY_FRAME_PENDING_EXPECTED_BYTES,
+                                                 FINAL_PACKET_LENGTH_WITH_IE,
                                                  (PHY_HEADER_SIZE + 2),
                                                  receivedPsdu,
                                                  FINAL_PACKET_LENGTH_WITH_IE);
@@ -1964,6 +2020,41 @@ static bool writeIeee802154EnhancedAck(sl_rail_handle_t          aRailHandle,
     {
         return false;
     }
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+    // The IE payload (Challenge LTV) arrives after DATA_REQUEST_COMMAND fires;
+    // spin-poll until the full frame is buffered before building the Enh-ACK.
+    if (otMacFrameIsSecurityEnabled(&receivedFrame) && otMacFrameIsKeyIdMode1(&receivedFrame))
+    {
+        uint8_t keyId = otMacFrameGetKeyId(&receivedFrame);
+
+        if (keyId >= OT_MAC_FRAME_WAKE_KEY_INDEX && keyId <= OT_MAC_FRAME_GUEST_WAKE_KEY_INDEX_MAX)
+        {
+            sl_rail_rx_packet_info_t liveInfo;
+
+            do
+            {
+                sli_ot_radio_interface_rail_get_rx_incoming_packet_info(&liveInfo);
+            } while (liveInfo.packet_bytes > 0 && liveInfo.packet_bytes < FINAL_PACKET_LENGTH_WITH_IE);
+
+            if (liveInfo.packet_bytes >= FINAL_PACKET_LENGTH_WITH_IE)
+            {
+                sl_rail_rx_packet_info_t limitedInfo = liveInfo;
+
+                limitedInfo.packet_bytes = FINAL_PACKET_LENGTH_WITH_IE;
+
+                if (limitedInfo.first_portion_bytes > FINAL_PACKET_LENGTH_WITH_IE)
+                {
+                    limitedInfo.first_portion_bytes = FINAL_PACKET_LENGTH_WITH_IE;
+                    limitedInfo.p_last_portion_data = nullptr;
+                }
+
+                sli_ot_radio_interface_rail_copy_rx_packet(receivedPsdu, &limitedInfo);
+                *initialPktReadBytes = FINAL_PACKET_LENGTH_WITH_IE;
+            }
+        }
+    }
+#endif
 
     linkMetricsDataLen = 0;
     dataPtr            = nullptr;
@@ -2733,6 +2824,14 @@ static void processTxComplete(otInstance *aInstance)
         sCurrentTxPacket->frame.mInfo.mTxInfo.mTxDelayBaseTime = 0;
         sCurrentTxPacket->frame.mInfo.mTxInfo.mTxDelay         = 0;
 
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+        // Restore default TX->RX transition before clearing the busy flag so that
+        // a queued frame on another instance cannot inherit the TX->Idle transition.
+        if (otMacFrameIsTdWakeCommand(&sCurrentTxPacket->frame))
+        {
+            setRadioTxToIdleOrRxTransition(false);
+        }
+#endif
 #if OPENTHREAD_CONFIG_MULTIPLE_INSTANCE_ENABLE
         CORE_DECLARE_IRQ_STATE;
         CORE_ENTER_ATOMIC();
@@ -2741,6 +2840,7 @@ static void processTxComplete(otInstance *aInstance)
 
         CORE_EXIT_ATOMIC();
 #endif
+
         otPlatRadioTxDone(sCurrentTxPacket->instance, &sCurrentTxPacket->frame, ackFrame, txStatus);
 
 #if RADIO_CONFIG_DEBUG_COUNTERS_SUPPORT

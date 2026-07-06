@@ -80,6 +80,7 @@ include:
   - path: tcp.h
   - path: tcp_ext.h
   - path: thread.h
+  - path: thread_direct.h
   - path: thread_ftd.h
   - path: trel.h
   - path: udp.h
@@ -103,6 +104,7 @@ include:
   - path: platform/mdns_socket.h
   - path: platform/otns.h
   - path: platform/radio.h
+  - path: platform/thread_direct.h
   - path: platform/time.h
   - path: platform/udp.h
   - path: platform/spi-slave.h
@@ -111,8 +113,6 @@ include:
   - path: platform/toolchain.h
   - path: platform/trel.h
   - path: platform/debug_uart.h
-  - path: provisional/link.h
-  - path: provisional/p2p.h
 - path: ../include
   file_list:
   - path: common/arg_macros.hpp
@@ -166,6 +166,7 @@ include:
   - path: common/locator.hpp
   - path: common/log.hpp
   - path: common/logging.hpp
+  - path: common/ltvs.hpp
   - path: common/message.hpp
   - path: common/message_allocator.hpp
   - path: common/msg_backed_array.hpp
@@ -229,7 +230,6 @@ include:
   - path: config/netdata_publisher.h
   - path: config/network_diagnostic.h
   - path: config/openthread-core-config-check.h
-  - path: config/p2p.h
   - path: config/parent_search.h
   - path: config/ping_sender.h
   - path: config/platform.h
@@ -239,10 +239,10 @@ include:
   - path: config/srp_client.h
   - path: config/srp_server.h
   - path: config/radio_link.h
+  - path: config/thread_direct.h
   - path: config/time_sync.h
   - path: config/tmf.h
   - path: config/trel.h
-  - path: config/wakeup.h
   - path: crypto/aes_ccm.hpp
   - path: crypto/aes_ecb.hpp
   - path: crypto/context_size.hpp
@@ -258,6 +258,7 @@ include:
   - path: mac/channel_mask.hpp
   - path: mac/data_poll_handler.hpp
   - path: mac/data_poll_sender.hpp
+  - path: mac/direct_handler.hpp
   - path: mac/link_raw.hpp
   - path: mac/mac.hpp
   - path: mac/mac_filter.hpp
@@ -339,6 +340,8 @@ include:
   - path: thread/child_table.hpp
   - path: thread/csl_tx_scheduler.hpp
   - path: thread/discover_scanner.hpp
+  - path: thread/direct_peer.hpp
+  - path: thread/direct_peer_table.hpp
   - path: thread/dua_manager.hpp
   - path: thread/energy_scan_server.hpp
   - path: thread/indirect_sender.hpp
@@ -370,8 +373,6 @@ include:
   - path: thread/network_diagnostic_tlvs.hpp
   - path: thread/network_diagnostic_types.hpp
   - path: thread/panid_query_server.hpp
-  - path: thread/peer.hpp
-  - path: thread/peer_table.hpp
   - path: thread/radio_selector.hpp
   - path: thread/router.hpp
   - path: thread/router_table.hpp

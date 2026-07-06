@@ -36,6 +36,7 @@
 #include <openthread/diag.h>
 #include <openthread/tasklet.h>
 #include <openthread/thread.h>
+#include <openthread/thread_ftd.h>
 
 #include "app.h"
 #include "openthread-system.h"
@@ -100,6 +101,9 @@ void app_init(void)
     initUdp();
     assert(otIp6SetEnabled(sInstance, true) == OT_ERROR_NONE);
     assert(otThreadSetEnabled(sInstance, true) == OT_ERROR_NONE);
+#if OPENTHREAD_FTD
+    assert(otThreadBecomeLeader(sInstance) == OT_ERROR_NONE);
+#endif
 }
 
 /******************************************************************************

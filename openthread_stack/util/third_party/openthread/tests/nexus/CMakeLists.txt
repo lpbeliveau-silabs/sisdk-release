@@ -45,6 +45,8 @@ set(COMMON_COMPILE_OPTIONS
     -DOPENTHREAD_MTD=0
     -DOPENTHREAD_RADIO=0
     -DOPENTHREAD_CONFIG_USE_STD_NEW=1
+    -DOPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE=1
+    -DOPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE=1
 )
 
 option(OT_NEXUS_GRPC "Enable Nexus gRPC" OFF)
@@ -452,6 +454,9 @@ endif()
 # Large network
 ot_nexus_test(full_network_reset "core;large_network;nexus")
 ot_nexus_test(large_network "core;large_network;nexus")
+
+# Thread Direct
+ot_nexus_test(td_link_handshake "thread_direct;nexus")
 
 # Live Demo Persistent Server
 if(EMSCRIPTEN)

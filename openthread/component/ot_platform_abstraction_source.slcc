@@ -29,6 +29,7 @@ source:
 - path: platform-abstraction/efr32/radio_channel_switching.cpp
 - path: platform-abstraction/efr32/radio_coex.c
 - path: platform-abstraction/efr32/radio_csl.cpp
+- path: platform-abstraction/efr32/radio_direct.cpp
 - path: platform-abstraction/efr32/radio_energy_scan.cpp
 - path: platform-abstraction/efr32/radio_extension.c
 - path: platform-abstraction/efr32/radio_interface.cpp

@@ -60,7 +60,6 @@ source:
 - path: api/netdata_publisher_api.cpp
 - path: api/netdiag_api.cpp
 - path: api/network_time_api.cpp
-- path: api/p2p_api.cpp
 - path: api/ping_sender_api.cpp
 - path: api/radio_stats_api.cpp
 - path: api/random_crypto_api.cpp
@@ -76,6 +75,7 @@ source:
 - path: api/tcp_api.cpp
 - path: api/tcp_ext_api.cpp
 - path: api/thread_api.cpp
+- path: api/thread_direct_api.cpp
 - path: api/thread_ftd_api.cpp
 - path: api/trel_api.cpp
 - path: api/udp_api.cpp
@@ -109,6 +109,7 @@ source:
 - path: common/heap_data.cpp
 - path: common/heap_string.cpp
 - path: common/log.cpp
+- path: common/ltvs.cpp
 - path: common/message.cpp
 - path: common/notifier.cpp
 - path: common/offset_range.cpp
@@ -137,17 +138,18 @@ source:
 - path: mac/channel_mask.cpp
 - path: mac/data_poll_handler.cpp
 - path: mac/data_poll_sender.cpp
+- path: mac/direct_handler.cpp
 - path: mac/link_raw.cpp
 - path: mac/mac.cpp
 - path: mac/mac_filter.cpp
 - path: mac/mac_frame.cpp
 - path: mac/mac_links.cpp
 - path: mac/mac_types.cpp
+- path: mac/scan_result.cpp
 - path: mac/sub_mac.cpp
 - path: mac/sub_mac_callbacks.cpp
 - path: mac/sub_mac_csl_receiver.cpp
-- path: mac/scan_result.cpp
-- path: mac/sub_mac_wed.cpp
+- path: mac/sub_mac_wl.cpp
 - path: mac/wakeup_tx_scheduler.cpp
 - path: meshcop/border_agent.cpp
 - path: meshcop/border_agent_admitter.cpp
@@ -220,6 +222,8 @@ source:
 - path: thread/child_supervision.cpp
 - path: thread/child_table.cpp
 - path: thread/csl_tx_scheduler.cpp
+- path: thread/direct_peer.cpp
+- path: thread/direct_peer_table.cpp
 - path: thread/discover_scanner.cpp
 - path: thread/dua_manager.cpp
 - path: thread/energy_scan_server.cpp
@@ -235,7 +239,6 @@ source:
 - path: thread/message_framer.cpp
 - path: thread/mle.cpp
 - path: thread/mle_ftd.cpp
-- path: thread/mle_p2p.cpp
 - path: thread/mle_tlvs.cpp
 - path: thread/mle_types.cpp
 - path: thread/mlr_manager.cpp
@@ -254,8 +257,6 @@ source:
 - path: thread/network_diagnostic_tlvs.cpp
 - path: thread/network_diagnostic_types.cpp
 - path: thread/panid_query_server.cpp
-- path: thread/peer.cpp
-- path: thread/peer_table.cpp
 - path: thread/radio_selector.cpp
 - path: thread/router.cpp
 - path: thread/router_table.cpp

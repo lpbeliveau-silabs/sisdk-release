@@ -56,6 +56,9 @@
 #include "radio/trel_link.hpp"
 #include "thread/key_manager.hpp"
 #include "thread/link_quality.hpp"
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+#include <openthread/thread_direct.h>
+#endif
 
 namespace ot {
 
@@ -71,6 +74,8 @@ class Neighbor;
  */
 
 namespace Mac {
+
+struct ScaParams;
 
 constexpr uint32_t kDataPollTimeout =
     OPENTHREAD_CONFIG_MAC_DATA_POLL_TIMEOUT; ///< Timeout for receiving Data Frame (in msec).
@@ -96,8 +101,8 @@ constexpr uint16_t kCslRequestAhead = OPENTHREAD_CONFIG_MAC_CSL_REQUEST_AHEAD_US
 
 constexpr uint16_t kMinCslIePeriod = OPENTHREAD_CONFIG_MAC_CSL_MIN_PERIOD;
 
-constexpr uint32_t kDefaultWedListenInterval = OPENTHREAD_CONFIG_WED_LISTEN_INTERVAL;
-constexpr uint32_t kDefaultWedListenDuration = OPENTHREAD_CONFIG_WED_LISTEN_DURATION;
+constexpr uint32_t kDefaultWlListenInterval = OPENTHREAD_CONFIG_THREAD_DIRECT_LISTEN_INTERVAL_US;
+constexpr uint32_t kDefaultWlListenDuration = OPENTHREAD_CONFIG_THREAD_DIRECT_LISTEN_DURATION_US;
 
 /**
  * Defines the function pointer which is called during an Energy Scan when the scan result for a channel is
@@ -224,11 +229,29 @@ public:
     void RequestCslFrameTransmission(uint32_t aDelay);
 #endif
 
-#if OPENTHREAD_CONFIG_WAKEUP_COORDINATOR_ENABLE
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
     /**
      * Requests `Mac` to start a wake-up frame transmission.
      */
     void RequestWakeupFrameTransmission(void);
+#endif
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    /**
+     * Requests `Mac` to transmit a TD Link Command frame.
+     *
+     * Called by `DirectHandler` when the attach-delay timer expires.
+     */
+    void RequestTdLinkCmdTransmission(void);
+#endif
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    /**
+     * Requests `Mac` to transmit a Thread Direct teardown frame.
+     *
+     * Called by `DirectHandler::Unlink()`.
+     */
+    void RequestTeardownTransmission(void);
 #endif
 
     /**
@@ -707,7 +730,7 @@ public:
      */
     uint8_t GetWakeupChannel(void) const { return mWakeupChannel; }
 
-#if OPENTHREAD_CONFIG_WAKEUP_COORDINATOR_ENABLE || OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
     /**
      * Sets the wake-up channel.
      *
@@ -719,7 +742,7 @@ public:
     Error SetWakeupChannel(uint8_t aChannel);
 #endif
 
-#if OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
     /**
      * Gets the wake-up listen parameters.
      *
@@ -760,7 +783,96 @@ public:
      * @retval FALSE  If listening for wake-up frames is not enabled.
      */
     bool IsWakeupListenEnabled(void) const { return mWakeupListenEnabled; }
-#endif // OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
+
+#endif // OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+    /**
+     * Registers a callback for Thread Direct link events.  Valid for both WI and WL roles.
+     *
+     * @param[in] aCallback  The callback function, or `nullptr` to deregister.
+     * @param[in] aContext   Application context passed to the callback.
+     */
+    void SetDirectEventCallback(otThreadDirectEventCallback aCallback, void *aContext)
+    {
+        mDirectEventCallback.Set(aCallback, aContext);
+    }
+
+    /**
+     * Invokes the registered Thread Direct event callback.
+     *
+     * @param[in] aEvent     The event type.
+     * @param[in] aPeerInfo  Peer info, or nullptr.
+     */
+    void InvokeDirectEvent(otThreadDirectEvent aEvent, const otThreadDirectPeerInfo *aPeerInfo)
+    {
+        mDirectEventCallback.InvokeIfSet(aEvent, aPeerInfo);
+    }
+
+    /**
+     * Returns whether a Thread Direct wake burst or WL sampling is currently active.
+     *
+     * @retval TRUE   Thread Direct wake activity is in progress.
+     * @retval FALSE  Otherwise.
+     */
+    bool IsThreadDirectLinkActive(void) const;
+
+    /**
+     * Updates the cached SCA state for a Thread Direct peer.
+     *
+     * Intended to be called by the Thread Direct handshake/decode path once a peer's
+     * SCA LTV has been decoded successfully.
+     *
+     * @param[in] aExtAddress    The peer extended address.
+     * @param[in] aSca           The decoded SCA parameters.
+     * @param[in] aRxTimestamp   The MAC-header-start RX timestamp of the frame carrying @p aSca, in microseconds.
+     *
+     * @retval kErrorNone      The peer SCA state was updated.
+     * @retval kErrorNotFound  No valid peer entry matches @p aExtAddress.
+     */
+    Error UpdateThreadDirectPeerSca(const ExtAddress &aExtAddress, const ScaParams &aSca, uint64_t aRxTimestamp);
+
+    /**
+     * Updates the cached Thread Direct clock accuracy and uncertainty for a peer.
+     *
+     * Intended to be called by the Thread Direct handshake/decode path once the
+     * peer-advertised timing accuracy values are decoded successfully.
+     *
+     * @param[in] aExtAddress  The peer extended address.
+     * @param[in] aAccuracy    The peer-advertised accuracy values.
+     *
+     * @retval kErrorNone      The peer accuracy state was updated.
+     * @retval kErrorNotFound  No valid peer entry matches @p aExtAddress.
+     */
+    Error UpdateThreadDirectPeerSlwAccuracy(const ExtAddress &aExtAddress, const CslAccuracy &aAccuracy);
+
+    /**
+     * Applies transmit timing to a direct frame when its destination matches a Thread Direct peer with
+     * cached SLW scheduling information.
+     *
+     * @param[in,out] aFrame        The frame to update.
+     * @param[in]     aDestAddress  The destination MAC address for the frame.
+     */
+    void ApplyThreadDirectTxScheduling(TxFrame &aFrame, const Address &aDestAddress) const;
+
+    /**
+     * Refreshes local Thread Direct SLW receive scheduling after the configured
+     * local SCA schedule changes.
+     *
+     * Re-evaluates whether local SLW scheduling should be enabled and, when it
+     * remains enabled, reapplies the active timing parameters.
+     */
+    void RefreshThreadDirectSlwScheduling(void);
+
+    /**
+     * Applies the current local Thread Direct SLW timing parameters to the
+     * active receive scheduler.
+     *
+     * Intended for callers that already know local SLW scheduling remains
+     * enabled and only need to refresh period/window/channel inputs.
+     */
+    void ApplyThreadDirectSlwParameters(void);
+#endif
 
     /**
      * Calculates the radio bus transfer time (in microseconds) for a given frame size based on `Radio::GetBusSpeed()`
@@ -790,8 +902,14 @@ private:
 #if OPENTHREAD_CONFIG_MAC_CSL_TRANSMITTER_ENABLE
         kOperationTransmitDataCsl,
 #endif
-#if OPENTHREAD_CONFIG_WAKEUP_COORDINATOR_ENABLE
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
         kOperationTransmitWakeup,
+#endif
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+        kOperationTransmitTdLinkCmd,
+#endif
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+        kOperationTransmitTdTeardown,
 #endif
     };
 
@@ -864,10 +982,13 @@ private:
     void UpdateCslParameters(void);
     void UpdateCslState(void);
 #endif
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+    void UpdateThreadDirectSlwState(void);
+#endif
 #if OPENTHREAD_CONFIG_MLE_LINK_METRICS_INITIATOR_ENABLE
     void ProcessEnhAckProbing(const RxFrame &aFrame, const Neighbor &aNeighbor);
 #endif
-#if OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
     Error HandleWakeupFrame(const RxFrame &aFrame);
     void  UpdateWakeupListening(void);
 #endif
@@ -888,8 +1009,11 @@ private:
     bool mShouldDelaySleep : 1;
     bool mDelayingSleep : 1;
 #endif
-#if OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
     bool mWakeupListenEnabled : 1;
+#endif
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+    bool mIsThreadDirectSlwEnabled : 1;
 #endif
     Operation   mOperation;
     uint16_t    mPendingOperations;
@@ -918,7 +1042,10 @@ private:
     uint16_t mCslPeriod;
 #endif
     uint8_t mWakeupChannel;
-#if OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+    Callback<otThreadDirectEventCallback> mDirectEventCallback;
+#endif
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
     uint32_t mWakeupListenInterval;
     uint32_t mWakeupListenDuration;
 #endif

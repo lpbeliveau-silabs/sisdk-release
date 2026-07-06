@@ -62,9 +62,6 @@
 #define PERSISTENCE_KEY_ID_USED_MAX (7)
 #define MAX_HMAC_KEY_SIZE (32)
 
-// Buffer size for exporting an IKM key (80 bytes is the maximum size for a SHA-256 key).
-#define HKDF_IKM_EXPORT_BUFFER_BYTES (80)
-
 #if !defined(_SILICON_LABS_32B_SERIES_3)
 static psa_status_t reImportUnwrapped(const otCryptoKey *aKey, otCryptoKeyRef *aHmacKeyRef);
 #endif
@@ -977,120 +974,6 @@ otError otPlatCryptoEcdsaVerify(const otPlatCryptoEcdsaPublicKey *aPublicKey,
     error = mapPsaStatusToOtError(status);
 
 exit:
-    return error;
-}
-
-otError otPlatCryptoHkdfInit(otCryptoContext *aContext)
-{
-    otError     error = OT_ERROR_NONE;
-    sl_status_t status;
-    size_t      contextSize;
-
-    otEXPECT_ACTION(aContext != NULL, error = OT_ERROR_INVALID_ARGS);
-
-    contextSize = sli_psa_context_get_size(SLI_PSA_CONTEXT_ENUM_NAME(psa_key_derivation_operation_t));
-    status      = sli_ot_crypto_context_init(aContext, contextSize);
-    otEXPECT_ACTION(status == SL_STATUS_OK, error = mapSlStatusToOtError(status));
-
-exit:
-    return error;
-}
-
-otError otPlatCryptoHkdfExtract(otCryptoContext   *aContext,
-                                const uint8_t     *aSalt,
-                                uint16_t           aSaltLength,
-                                const otCryptoKey *aInputKey)
-{
-    otError                         error     = OT_ERROR_NONE;
-    psa_status_t                    status    = PSA_SUCCESS;
-    psa_key_derivation_operation_t *operation = NULL;
-    otCryptoKeyRef                  keyRef    = PSA_KEY_ID_NULL;
-    size_t                          keyLength = 0;
-    uint8_t                         keyBuffer[HKDF_IKM_EXPORT_BUFFER_BYTES];
-    psa_key_attributes_t            attributes = PSA_KEY_ATTRIBUTES_INIT;
-
-    otEXPECT_ACTION(aContext != NULL, error = OT_ERROR_INVALID_ARGS);
-    otEXPECT_ACTION(aContext->mContext != NULL, error = OT_ERROR_INVALID_ARGS);
-    otEXPECT_ACTION(aInputKey != NULL, error = OT_ERROR_INVALID_ARGS);
-
-    operation = (psa_key_derivation_operation_t *)aContext->mContext;
-
-    status = sl_sec_man_export_key(aInputKey->mKeyRef, keyBuffer, sizeof(keyBuffer), &keyLength);
-    otEXPECT_ACTION(status == PSA_SUCCESS, error = mapPsaStatusToOtError(status));
-
-    psa_set_key_usage_flags(&attributes, getPsaKeyUsage(OT_CRYPTO_KEY_USAGE_DERIVE));
-    psa_set_key_algorithm(&attributes, getPsaAlgorithm(OT_CRYPTO_KEY_ALG_HKDF_SHA256));
-    psa_set_key_type(&attributes, getPsaKeyType(OT_CRYPTO_KEY_TYPE_DERIVE));
-    psa_set_key_bits(&attributes, (8 * keyLength));
-    psa_set_key_lifetime(&attributes, PSA_KEY_LIFETIME_VOLATILE);
-
-    status = psa_import_key(&attributes, keyBuffer, keyLength, &keyRef);
-    otEXPECT_ACTION(status == PSA_SUCCESS, error = mapPsaStatusToOtError(status));
-
-    status = sl_sec_man_key_derivation_extract(operation, PSA_ALG_SHA_256, keyRef, aSalt, aSaltLength);
-    otEXPECT_ACTION(status == PSA_SUCCESS, error = mapPsaStatusToOtError(status));
-
-exit:
-    psa_reset_key_attributes(&attributes);
-    if (keyRef != PSA_KEY_ID_NULL)
-    {
-        psa_destroy_key(keyRef);
-    }
-
-    memset(keyBuffer, 0, sizeof(keyBuffer));
-
-    return error;
-}
-
-otError otPlatCryptoHkdfExpand(otCryptoContext *aContext,
-                               const uint8_t   *aInfo,
-                               uint16_t         aInfoLength,
-                               uint8_t         *aOutputKey,
-                               uint16_t         aOutputKeyLength)
-{
-    otError                         error  = OT_ERROR_NONE;
-    psa_status_t                    status = PSA_SUCCESS;
-    psa_key_derivation_operation_t *operation;
-
-    otEXPECT_ACTION(aContext != NULL, error = OT_ERROR_INVALID_ARGS);
-    otEXPECT_ACTION(aContext->mContext != NULL, error = OT_ERROR_INVALID_ARGS);
-    otEXPECT_ACTION(aOutputKey != NULL, error = OT_ERROR_INVALID_ARGS);
-    otEXPECT_ACTION(aOutputKeyLength != 0, error = OT_ERROR_INVALID_ARGS);
-    otEXPECT_ACTION(aInfo != NULL || aInfoLength == 0, error = OT_ERROR_INVALID_ARGS);
-
-    operation = (psa_key_derivation_operation_t *)aContext->mContext;
-
-    status = sl_sec_man_key_derivation_expand(operation, aInfo, aInfoLength, aOutputKey, aOutputKeyLength);
-    otEXPECT_ACTION(status == PSA_SUCCESS, error = mapPsaStatusToOtError(status));
-
-exit:
-    return error;
-}
-
-otError otPlatCryptoHkdfDeinit(otCryptoContext *aContext)
-{
-    otError                         error = OT_ERROR_NONE;
-    psa_status_t                    status;
-    sl_status_t                     slstatus = SL_STATUS_OK;
-    psa_key_derivation_operation_t *operation;
-
-    otEXPECT_ACTION(aContext != NULL, error = OT_ERROR_INVALID_ARGS);
-    otEXPECT_ACTION(aContext->mContext != NULL, error = OT_ERROR_INVALID_ARGS);
-
-    operation = (psa_key_derivation_operation_t *)aContext->mContext;
-
-    status = psa_key_derivation_abort(operation);
-    otEXPECT_ACTION(status == PSA_SUCCESS, error = mapPsaStatusToOtError(status));
-
-exit:
-    slstatus = sli_ot_crypto_context_deinit(aContext);
-
-    if (error == OT_ERROR_NONE && slstatus != SL_STATUS_OK)
-    {
-        // PSA abort already reported in `error', only override when abort succeeded.
-        error = mapSlStatusToOtError(slstatus);
-    }
-
     return error;
 }
 

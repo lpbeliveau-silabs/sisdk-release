@@ -39,6 +39,8 @@
 #include "common/as_core_type.hpp"
 #include "common/bit_utils.hpp"
 #include "common/encoding.hpp"
+#include "common/frame_builder.hpp"
+#include "common/ltvs.hpp"
 #include "common/numeric_limits.hpp"
 #include "mac/mac_types.hpp"
 
@@ -286,138 +288,196 @@ public:
     static constexpr uint8_t  kEnhAckProbingIe          = 0x00;
 };
 
-#if OPENTHREAD_CONFIG_WAKEUP_COORDINATOR_ENABLE || OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
 /**
- * This class implements Rendezvous Time IE data structure.
+ * Defines the Thread Header IE Element ID and LTV type codes.
  *
- * IEEE 802.15.4 Rendezvous Time IE contains two fields, Rendezvous Time and
- * Wake-up Interval, but the Wake-up Interval is not used in Thread, so it is
- * not included in this class.
+ * The Thread Header IE is an IEEE 802.15.4 Header IE with Element ID 0x2d.
+ * Its payload is a sequence of LTV (Length-Type-Value) encoded elements.
  */
-OT_TOOL_PACKED_BEGIN
-class RendezvousTimeIe
+struct ThreadHeaderIe
 {
-public:
-    static constexpr uint8_t kHeaderIeId    = 0x1d;
-    static constexpr uint8_t kIeContentSize = sizeof(uint16_t);
+    static constexpr uint8_t kElementId     = 0x2d; ///< IEEE 802.15.4 Header IE Element ID for Thread Group.
+    static constexpr uint8_t kTypeTargetId  = 0x01; ///< Target ID LTV - Wake Identifier filter.
+    static constexpr uint8_t kTypeSca       = 0x02; ///< Scheduled Channel Access LTV.
+    static constexpr uint8_t kTypeChallenge = 0x03; ///< Thread Challenge LTV.
 
-    /**
-     * This method returns the Rendezvous Time.
-     *
-     * @returns the Rendezvous Time in the units of 10 symbols.
-     */
-    uint16_t GetRendezvousTime(void) const { return LittleEndian::HostSwap16(mRendezvousTime); }
-
-    /**
-     * This method sets the Rendezvous Time.
-     *
-     * @param[in]  aRendezvousTime  The Rendezvous Time in the units of 10 symbols.
-     */
-    void SetRendezvousTime(uint16_t aRendezvousTime) { mRendezvousTime = LittleEndian::HostSwap16(aRendezvousTime); }
-
-private:
-    uint16_t mRendezvousTime;
-} OT_TOOL_PACKED_END;
+    // Challenge LTV (18 B) + SCA LTV with full 256-bit RAM bitmap and SLW (41 B) = 59 B.
+    // Use 64 to stay aligned and leave one byte of margin.
+    static constexpr uint8_t kEnhAckPlainMaxSize = 64;
+};
 
 /**
- * Implements Connection IE data structure.
+ * Enumerates SCA slot duration encodings from the current Thread Direct specification.
  */
-OT_TOOL_PACKED_BEGIN
-class ConnectionIe : public VendorIeHeader
+enum class ScaSlotDuration : uint8_t
 {
-public:
-    static constexpr uint8_t kHeaderIeId      = ThreadIe::kHeaderIeId;
-    static constexpr uint8_t kIeContentSize   = ThreadIe::kIeContentSize + sizeof(uint8_t);
-    static constexpr uint8_t kThreadIeSubtype = 0x01;
+    k625Usec  = 0, ///< 625 us slot duration.
+    k1250Usec = 1, ///< 1.25 ms slot duration.
+    k625Msec  = 2, ///< 625 ms slot duration.
+    k1250Msec = 3, ///< 1.25 s slot duration.
+};
 
-    /**
-     * Initializes the Connection IE.
-     */
-    void Init(void)
-    {
-        SetVendorOui(ThreadIe::kVendorOuiThreadCompanyId);
-        SetSubType(kThreadIeSubtype);
-        mConnectionWindow = 0;
-    }
+/**
+ * In-memory representation of SCA LTV parameters.
+ *
+ * Wire format (value bytes after Type):
+ *   2B fixed header (LE): bits[1:0]=SlotDuration, bits[12:2]=RamOffset, bit[13]=RamAvailable, bits[15:14]=RSV
+ *   If mRamAvailable: 1B RamDuration + ceil(mRamDuration/8) RAM Bits bytes
+ *   If mHasSlw: 2B SLW Period (LE) + 2B SLW Phase (LE)
+ *   Teardown: zero-length value (mIsTeardown flag; AppendScaLtvTeardown emits this form).
+ *
+ * SLW Period and SLW Phase are expressed in units of Slot Duration.
+ *
+ * RAM Available = FALSE indicates no CoEx constraints and no RAM bitmap.
+ * RAM Available = TRUE with RAM Duration = 0 indicates no change to the
+ * previously communicated RAM, while SLW fields may still be updated.
+ */
+struct ScaParams
+{
+    static constexpr uint8_t kRamBitsMaxBytes = 32; ///< Maximum RAM bitmap size (256 bits).
+    static constexpr int16_t kRamOffsetUsMin  = -1024;
+    static constexpr int16_t kRamOffsetUsMax  = 1023;
 
-    /**
-     * Returns the Retry Interval.
-     *
-     * The Retry Interval defines how frequently the Wake-up End Device is
-     * supposed to retry sending the Parent Request to the Wake-up Coordinator.
-     *
-     * @returns the Retry Interval in the units of Wake-up Intervals (7.5ms by default).
-     */
-    uint8_t GetRetryInterval(void) const { return ReadBits<uint8_t, kRetryIntervalMask>(mConnectionWindow); }
+    uint16_t        mSlwPeriodSlots; ///< SLW period in slot-duration units (0 = rx-on-when-idle); valid when mHasSlw.
+    uint16_t        mSlwPhaseSlots;  ///< SLW phase in slot-duration units; valid when mHasSlw.
+    int16_t         mRamOffsetUs;    ///< RAM Offset in us, signed [-1024, 1023].
+    uint8_t         mRamDuration;    ///< Number of bits in mRamBits (0 = no change); valid when mRamAvailable.
+    ScaSlotDuration mSlotDuration;   ///< Slot duration code: 0=625us, 1=1.25ms, 2=625ms, 3=1.25s.
+    bool            mRamAvailable;   ///< True if RAM Duration and RAM Bits are present in the SCA LTV.
+    bool            mHasSlw;         ///< True if SLW Period and Phase are present in the SCA LTV.
+    uint8_t         mRamBits[kRamBitsMaxBytes]; ///< RAM bitmap; ceil(mRamDuration/8) bytes valid when mRamAvailable.
+};
 
-    /**
-     * Sets the Retry Interval.
-     *
-     * @param[in]  aRetryInterval  The Retry Interval in the units of Wake-up Intervals (7.5ms by default).
-     */
-    void SetRetryInterval(uint8_t aRetryInterval)
-    {
-        WriteBits<uint8_t, kRetryIntervalMask>(mConnectionWindow, aRetryInterval);
-    }
+/**
+ * Holds the 16-byte challenge value carried in a Thread Direct Challenge LTV.
+ */
+struct ChallengeLtv
+{
+    static constexpr uint8_t kLength = 16; ///< Challenge value length in bytes (truncated HMAC-SHA256).
+    uint8_t                  mChallenge[kLength];
+};
 
-    /**
-     * Returns the Retry Count.
-     *
-     * The Retry Count defines how many times the Wake-up End Device is supposed
-     * to retry sending the Parent Request to the Wakeup Coordinator.
-     *
-     * @returns the Retry Count.
-     */
-    uint8_t GetRetryCount(void) const { return ReadBits<uint8_t, kRetryCountMask>(mConnectionWindow); }
+/**
+ * Appends a Thread Header IE (Element ID 0x2d) containing the given LTV payload to a FrameBuilder.
+ *
+ * @param[in,out] aFrameBuilder  The FrameBuilder to append to.
+ * @param[in]     aLtvPayload    Pointer to the serialised LTV bytes to place inside the IE.
+ * @param[in]     aLtvLen        Length of aLtvPayload in bytes (must fit in 7-bit IE length field).
+ *
+ * @retval kErrorNone   Successfully appended.
+ * @retval kErrorNoBufs Insufficient space in the FrameBuilder.
+ */
+Error AppendThreadHeaderIe(FrameBuilder &aFrameBuilder, const uint8_t *aLtvPayload, uint8_t aLtvLen);
 
-    /**
-     * Sets the Retry Count
-     *
-     * @param[in]  aRetryCount  The Retry Count.
-     */
-    void SetRetryCount(uint8_t aRetryCount) { WriteBits<uint8_t, kRetryCountMask>(mConnectionWindow, aRetryCount); }
+/**
+ * Appends an SCA LTV to a FrameBuilder.
+ *
+ * @param[in,out] aFrameBuilder  The FrameBuilder to append to.
+ * @param[in]     aParams        SCA parameters to encode.
+ *
+ * @retval kErrorNone   Successfully appended.
+ * @retval kErrorNoBufs Insufficient space in the FrameBuilder.
+ */
+Error AppendScaLtv(FrameBuilder &aFrameBuilder, const ScaParams &aParams);
 
-    /**
-     * Sets the Wake-up Identifier.
-     *
-     * @param[in]  aWakeupId  The Wake-up Identifier.
-     *
-     * @retval kErrorNone   Successfully set the Wake-up Identifier.
-     * @retval kErrorParse  The length of the given Wake-up Identifier didn't match the reserved length.
-     */
-    Error SetWakeupId(WakeupId aWakeupId);
+/**
+ * Appends a zero-length (teardown) SCA LTV to a FrameBuilder.
+ *
+ * A zero-length SCA LTV signals TD link teardown to the receiver.
+ *
+ * @param[in,out] aFrameBuilder  The FrameBuilder to append to.
+ *
+ * @retval kErrorNone   Successfully appended.
+ * @retval kErrorNoBufs Insufficient space in the FrameBuilder.
+ */
+Error AppendScaLtvTeardown(FrameBuilder &aFrameBuilder);
 
-    /**
-     * Gets the Wake-up Identifier.
-     *
-     * @param[out]  aWakeupId  A reference to the Wake-up Identifier.
-     *
-     * @retval kErrorNone    Successfully got the Wake-up Identifier.
-     * @retval kErrorParse   Failed to parse the Wake-up Identifier from the Connection IE.
-     */
-    Error GetWakeupId(WakeupId &aWakeupId) const;
+/**
+ * Appends a Challenge LTV to a FrameBuilder.
+ *
+ * @param[in,out] aFrameBuilder  The FrameBuilder to append to.
+ * @param[in]     aChallenge     The 16-byte challenge value to encode.
+ *
+ * @retval kErrorNone   Successfully appended.
+ * @retval kErrorNoBufs Insufficient space in the FrameBuilder.
+ */
+Error AppendChallengeLtv(FrameBuilder &aFrameBuilder, const ChallengeLtv &aChallenge);
 
-    /**
-     * Gets the pointer to the HeaderIe of this ConnectionIe.
-     *
-     * @returns A pointer to the HeaderIe.
-     */
-    const HeaderIe *GetHeaderIe(void) const
-    {
-        return reinterpret_cast<const HeaderIe *>(reinterpret_cast<const uint8_t *>(this) - sizeof(HeaderIe));
-    }
+/**
+ * Appends a Target ID LTV to a FrameBuilder.
+ *
+ * @param[in,out] aFrameBuilder  The FrameBuilder to append to.
+ * @param[in]     aTargetId      Pointer to the Target ID bytes.
+ * @param[in]     aLen           Length of aTargetId in bytes.
+ *
+ * @retval kErrorNone   Successfully appended.
+ * @retval kErrorNoBufs Insufficient space in the FrameBuilder.
+ */
+Error AppendTargetIdLtv(FrameBuilder &aFrameBuilder, const uint8_t *aTargetId, uint8_t aLen);
 
-private:
-    static constexpr uint8_t kRetryIntervalOffset = 4;
-    static constexpr uint8_t kRetryIntervalMask   = 0x3 << kRetryIntervalOffset;
-    static constexpr uint8_t kRetryCountMask      = 0xf;
+/**
+ * Packs a sequence of plain Length-Type-Value entries (as produced by `Ltv::Append`) into the
+ * Thread Header IE adaptive packing format defined in Thread Specification chapter 16.
+ *
+ * The number of bits used for length and type in the first header byte is determined by the
+ * total remaining byte count L at each LTV's position in the sequence.  Packing always produces
+ * output that is equal in size or smaller than the plain input.
+ *
+ * @param[in]  aPlain     Pointer to the plain LTV bytes (each entry: 1-byte Length, 1-byte Type,
+ *                        Length value bytes).
+ * @param[in]  aPlainLen  Length of @p aPlain in bytes.
+ * @param[out] aPacked    Output buffer.  Must be at least @p aPlainLen bytes.
+ * @param[in]  aPackedMax Size of @p aPacked.
+ *
+ * @returns  Number of bytes written to @p aPacked.  Zero if @p aPlainLen is zero.
+ */
+uint8_t PackThreadHeaderIeLtvs(const uint8_t *aPlain, uint8_t aPlainLen, uint8_t *aPacked, uint8_t aPackedMax);
 
-    const uint8_t *GetWakeupIdData(void) const { return reinterpret_cast<const uint8_t *>(this) + sizeof(*this); }
-    uint8_t       *GetWakeupIdData(void) { return reinterpret_cast<uint8_t *>(this) + sizeof(*this); }
+/**
+ * Unpacks a Thread Header IE adaptive-packing LTV sequence into plain Length-Type-Value form.
+ *
+ * @param[in]  aPacked     Pointer to the packed LTV bytes.
+ * @param[in]  aPackedLen  Length of @p aPacked in bytes.
+ * @param[out] aPlain      Output buffer for the plain LTV bytes.
+ * @param[in]  aPlainMax   Size of @p aPlain.
+ * @param[out] aPlainLen   Set to the number of plain bytes written on success.
+ *
+ * @retval kErrorNone    Successfully unpacked.
+ * @retval kErrorParse   Buffer is truncated or malformed.
+ * @retval kErrorNoBufs  @p aPlain is too small for the unpacked output.
+ */
+Error UnpackThreadHeaderIeLtvs(const uint8_t *aPacked,
+                               uint8_t        aPackedLen,
+                               uint8_t       *aPlain,
+                               uint8_t        aPlainMax,
+                               uint8_t       &aPlainLen);
 
-    uint8_t mConnectionWindow;
-} OT_TOOL_PACKED_END;
-#endif // OPENTHREAD_CONFIG_WAKEUP_COORDINATOR_ENABLE || OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
+/**
+ * Parses the LTV payload of a Thread Header IE.
+ *
+ * Unpacks the adaptive-packed LTV sequence, then walks all entries.  For each LTV whose type
+ * matches a known Thread Direct type, the output parameter is populated when non-null.  Unknown
+ * types are skipped.  A zero-length SCA LTV (teardown signal) sets @p aTeardown when non-null.
+ *
+ * @param[in]  aBuffer           Pointer to the IE payload (the bytes after the 2-byte HeaderIe header).
+ * @param[in]  aLength           Length of @p aBuffer in bytes.
+ * @param[out] aScaParams        If non-null, populated when a non-empty SCA LTV is found.
+ * @param[out] aChallenge        If non-null, populated when a Challenge LTV is found.
+ * @param[out] aTeardown         If non-null, set to true when a zero-length (teardown) SCA LTV is found.
+ * @param[out] aChallengePresent If non-null, set to true when a Challenge LTV is found.
+ *
+ * @retval kErrorNone   Parsing succeeded (all LTV entries are well-formed).
+ * @retval kErrorParse  Buffer is truncated or malformed.
+ */
+Error ParseThreadHeaderIe(const uint8_t *aBuffer,
+                          uint8_t        aLength,
+                          ScaParams     *aScaParams,
+                          ChallengeLtv  *aChallenge,
+                          bool          *aTeardown         = nullptr,
+                          bool          *aChallengePresent = nullptr);
+
+#endif // OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
 
 /**
  * @}

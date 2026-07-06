@@ -480,7 +480,26 @@ public:
     }
 #endif // OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
 
-#if OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+    /**
+     * Configures Thread Direct SLW receive scheduling in all radios.
+     *
+     * @param[in]  aEnable     Whether to enable or disable local SLW receive scheduling.
+     * @param[in]  aPeriodUs   The SLW period in microseconds.
+     * @param[in]  aChannel    The Thread channel used for SLW sampling.
+     */
+    void UpdateThreadDirectSlw(bool aEnable, uint32_t aPeriodUs, uint8_t aChannel)
+    {
+        OT_UNUSED_VARIABLE(aEnable);
+        OT_UNUSED_VARIABLE(aPeriodUs);
+        OT_UNUSED_VARIABLE(aChannel);
+#if OPENTHREAD_CONFIG_RADIO_LINK_IEEE_802_15_4_ENABLE
+        mSubMac.UpdateThreadDirectSlw(aEnable, aPeriodUs, aChannel);
+#endif
+    }
+#endif
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
     /**
      * Configures wake-up listening parameters in all radios.
      *

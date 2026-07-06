@@ -457,6 +457,7 @@ private:
 
     void          HandleReceivedFrame(Mac::RxFrame &aFrame);
     Mac::TxFrame *HandleFrameRequest(Mac::TxFrames &aTxFrames);
+    void          ApplyThreadDirectTxScheduling(Mac::TxFrame &aFrame);
     Neighbor     *UpdateNeighborOnSentFrame(Mac::TxFrame       &aFrame,
                                             Error               aError,
                                             const Mac::Address &aMacDest,

@@ -115,6 +115,21 @@ uint8_t sli_ot_radio_security_get_ack_key_id(otInstance *aInstance);
  */
 uint32_t sli_ot_radio_security_get_ack_frame_counter(otInstance *aInstance);
 
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+/**
+ * @brief Register or remove a Thread Direct Wake Key at the given key index.
+ *
+ * Stores wake key material so that the platform security module can encrypt and
+ * decrypt TD Wake Frames in hardware. Accepts key index 129 (default network-derived
+ * wake key) and 130-192 (guest wake keys). Pass NULL for @p aWakeKey to remove.
+ *
+ * @param[in] aInstance  The OpenThread instance.
+ * @param[in] aKeyIndex  Key index (129 for default, 130-192 for guest keys).
+ * @param[in] aWakeKey   Key material to register, or NULL to remove.
+ */
+void sli_ot_radio_security_set_wake_key(otInstance *aInstance, uint8_t aKeyIndex, const otMacKeyMaterial *aWakeKey);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

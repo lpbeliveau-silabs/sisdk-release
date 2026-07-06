@@ -12,9 +12,7 @@ requires:
 recommends:
 - id: ot_stack_ftd
   vendor: silabs
-
 root_path: openthread_stack/util/third_party/openthread/src
-
 include:
 - path: .
 - path: cli
@@ -34,7 +32,6 @@ include:
   file_list:
   - path: endian.hpp
   - path: math.hpp
-
 source:
 - path: ../examples/apps/ncp/ncp.c
   unless:
@@ -50,10 +47,7 @@ source:
 - path: ncp/ncp_spi.cpp
 - path: ncp/platform/dnssd.cpp
 - path: ncp/platform/infra_if.cpp
-- path: ncp/platform/mdns_socket.cpp
-- path: ncp/platform/trel.cpp
 - path: lib/hdlc/hdlc.cpp
-
 define:
 - name: OPENTHREAD_PROJECT_LIB_CONFIG_FILE
   value: '"sl_openthread_features_config.h"'
@@ -65,7 +59,6 @@ define:
   value: '"sl_openthread_features_ncp_mtd_config.h"'
   condition: [ot_stack_mtd]
 - name: _GNU_SOURCE
-
 toolchain_settings:
 - option: gcc_compiler_option
   value: -fno-strict-aliasing
@@ -75,14 +68,12 @@ toolchain_settings:
   value: -fno-strict-aliasing
   condition:
   - toolchain_lto
-
 template_contribution:
 - name: component_catalog
   value: openthread_ncp
 - name: ot_init
   value: sl_ot_ncp_init
   priority: 5
-
 metadata:
   sbom:
     reference: ot_sbom_openthread

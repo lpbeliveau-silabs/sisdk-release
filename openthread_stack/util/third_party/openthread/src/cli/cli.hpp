@@ -77,6 +77,7 @@
 #include "cli/cli_srp_server.hpp"
 #include "cli/cli_tcat.hpp"
 #include "cli/cli_tcp.hpp"
+#include "cli/cli_td.hpp"
 #include "cli/cli_udp.hpp"
 #include "cli/cli_utils.hpp"
 
@@ -120,6 +121,7 @@ class Interpreter : public OutputImplementer, public Utils
     friend class PingSender;
     friend class SrpClient;
     friend class SrpServer;
+    friend class ThreadDirect;
 #endif
     friend void otCliPlatLogv(otLogLevel, otLogRegion, const char *, va_list);
     friend void otCliAppendResult(otError aError);
@@ -325,21 +327,6 @@ private:
     static void HandleIp6Receive(otMessage *aMessage, void *aContext);
 #endif
 
-#if OPENTHREAD_CONFIG_P2P_ENABLE
-#if OPENTHREAD_CONFIG_WAKEUP_COORDINATOR_ENABLE
-    static void HandleP2pLinkDone(void *aContext);
-    void        HandleP2pLinkDone(void);
-#endif
-
-    static void HandleP2pUnlinkDone(void *aContext);
-    void        HandleP2pUnlinkDone(void);
-#endif
-
-#if OPENTHREAD_CONFIG_WAKEUP_COORDINATOR_ENABLE
-    static void HandleWakeupResult(otError aError, void *aContext);
-    void        HandleWakeupResult(otError aError);
-#endif
-
 #endif // OPENTHREAD_FTD || OPENTHREAD_MTD
 
 #if OPENTHREAD_CONFIG_DIAG_ENABLE
@@ -438,6 +425,9 @@ private:
 #endif
 #if OPENTHREAD_CONFIG_BLE_TCAT_ENABLE && OPENTHREAD_CONFIG_CLI_BLE_SECURE_ENABLE
     Tcat mTcat;
+#endif
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    ThreadDirect mThreadDirect;
 #endif
 #if OPENTHREAD_CONFIG_PING_SENDER_ENABLE
     PingSender mPing;

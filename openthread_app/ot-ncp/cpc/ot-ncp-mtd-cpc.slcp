@@ -5,7 +5,6 @@ description: >
   Demonstrates OpenThread Minimal Thread Device (MTD) Network Co-Processor (NCP) application using CPC (Co-Processor Communication).
 category: OpenThread Examples
 quality: production
-
 component:
   - id: sl_main
   - id: ot_stack_mtd
@@ -29,15 +28,12 @@ component:
   - id: toolchain_llvm_lto
     condition: [toolchain_llvm]
   - id: ot_cli_source
-
 include:
   - path: .
     file_list:
       - path: app.h
-
 source:
   - path: app.c
-
 configuration:
   - name: SL_CPC_DRV_UART_VCOM_BAUDRATE
     value: 115200
@@ -105,18 +101,14 @@ configuration:
   - name: configTOTAL_HEAP_SIZE
     value: 16384
     condition: [toolchain_lto, freertos]
-
 tag:
   - prebuilt_demo
   - hwfilter:device:device_supports_thread
   - hwfilter:!device:device_family_efr32mr21
   - toolchain:gcc
   - toolchain:llvm
-  - hwfilter:ram:128k
-
 readme:
   - path: ./README-OT-NCP.md
-
 filter:
   - name: "Wireless Technology"
     value: ["Thread"]
@@ -124,7 +116,6 @@ filter:
     value: ["NCP"]
   - name: "Project Difficulty"
     value: ["Advanced"]
-
 ui_hints:
   highlight:
     - path: ./README-OT-NCP.md

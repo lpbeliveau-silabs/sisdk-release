@@ -76,6 +76,21 @@ struct securityMaterial
 // Per-instance security material
 static securityMaterial sMacKeys[RADIO_INTERFACE_COUNT];
 
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+// Default wake key (index 129): derived from the Network Key, one static slot per interface.
+static otMacKeyMaterial sDefaultWakeKey[RADIO_INTERFACE_COUNT];
+
+// Guest wake keys (indices 130-192): one static slot per peer per interface.
+// Slot is empty when mKeyIndex == 0.
+typedef struct
+{
+    uint8_t          mKeyIndex;
+    otMacKeyMaterial mKey;
+} sli_ot_wake_guest_key_t;
+
+static sli_ot_wake_guest_key_t sGuestWakeKeys[RADIO_INTERFACE_COUNT][OPENTHREAD_CONFIG_THREAD_DIRECT_MAX_DIRECT_PEERS];
+#endif
+
 // External declarations
 extern otExtAddress sExtAddress[RADIO_EXT_ADDR_COUNT];
 
@@ -93,6 +108,11 @@ void sli_ot_radio_security_init(void)
             sMacKeys[i].ksuSlot[k] = 0xFF;
         }
     }
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    memset(sDefaultWakeKey, 0, sizeof(sDefaultWakeKey));
+    memset(sGuestWakeKeys, 0, sizeof(sGuestWakeKeys));
+#endif
 }
 
 void sli_ot_radio_security_deinit(void)
@@ -118,49 +138,20 @@ void sli_ot_radio_security_deinit(void)
 
     // Clear security material for all instances
     memset(sMacKeys, 0, sizeof(sMacKeys));
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    memset(sDefaultWakeKey, 0, sizeof(sDefaultWakeKey));
+    memset(sGuestWakeKeys, 0, sizeof(sGuestWakeKeys));
+#endif
 }
 
-otError sli_ot_radio_security_process_transmit(otRadioFrame *aFrame, otInstance *aInstance)
+static otError sli_ot_radio_security_finish_transmit(otRadioFrame      *aFrame,
+                                                     instanceIndex_t    aIndex,
+                                                     otMacKeyMaterial  *aKeyMaterial,
+                                                     uint8_t            aKeyId,
+                                                     volatile uint32_t *aFrameCounter)
 {
-    otError         error = OT_ERROR_NONE;
-    uint8_t         keyId;
-    uint8_t         keyToUse;
-    instanceIndex_t instanceIndex = sli_ot_radio_instance_get_index(aInstance);
-
-    otEXPECT(otMacFrameIsSecurityEnabled(aFrame) && otMacFrameIsKeyIdMode1(aFrame)
-             && !aFrame->mInfo.mTxInfo.mIsSecurityProcessed);
-
-    if (otMacFrameIsAck(aFrame))
-    {
-        keyId = otMacFrameGetKeyId(aFrame);
-
-        otEXPECT_ACTION(keyId != 0, error = OT_ERROR_FAILED);
-
-        if (keyId == sMacKeys[instanceIndex].keyId - 1)
-        {
-            keyToUse = static_cast<uint8_t>(MacKeyType::PREV);
-        }
-        else if (keyId == sMacKeys[instanceIndex].keyId)
-        {
-            keyToUse = static_cast<uint8_t>(MacKeyType::CURRENT);
-        }
-        else if (keyId == sMacKeys[instanceIndex].keyId + 1)
-        {
-            keyToUse = static_cast<uint8_t>(MacKeyType::NEXT);
-        }
-        else
-        {
-            error = OT_ERROR_SECURITY;
-            otEXPECT(false);
-        }
-    }
-    else
-    {
-        keyId    = sMacKeys[instanceIndex].keyId;
-        keyToUse = static_cast<uint8_t>(MacKeyType::CURRENT);
-    }
-
-    aFrame->mInfo.mTxInfo.mAesKey = &sMacKeys[instanceIndex].keys[keyToUse];
+    aFrame->mInfo.mTxInfo.mAesKey = aKeyMaterial;
 
     if (!aFrame->mInfo.mTxInfo.mIsHeaderUpdated)
     {
@@ -168,28 +159,165 @@ otError sli_ot_radio_security_process_transmit(otRadioFrame *aFrame, otInstance 
         CORE_DECLARE_IRQ_STATE;
 
         CORE_ENTER_ATOMIC();
+        frameCounter = (*aFrameCounter)++;
 
-        frameCounter                            = sMacKeys[instanceIndex].macFrameCounter;
-        sMacKeys[instanceIndex].macFrameCounter = frameCounter + 1;
-
-        if (otMacFrameIsAck(aFrame))
+        // Store ack frame counter and ack key ID for receive frame.
+        // Only update for MAC keys (key IDs 1-128); wake-key ACKs must not
+        // overwrite the MAC ACK context read back by the receive path.
+        if (otMacFrameIsAck(aFrame) && aKeyId < OT_MAC_FRAME_WAKE_KEY_INDEX)
         {
-            // Store ack frame counter and ack key ID for receive frame
-            sMacKeys[instanceIndex].ackKeyId        = keyId;
-            sMacKeys[instanceIndex].ackFrameCounter = frameCounter;
+            sMacKeys[aIndex].ackKeyId        = aKeyId;
+            sMacKeys[aIndex].ackFrameCounter = frameCounter;
         }
 
         CORE_EXIT_ATOMIC();
 
-        otMacFrameSetKeyId(aFrame, keyId);
+        otMacFrameSetKeyId(aFrame, aKeyId);
         otMacFrameSetFrameCounter(aFrame, frameCounter);
     }
 
-    efr32PlatProcessTransmitAesCcm(aFrame, &sExtAddress[instanceIndex]);
+    efr32PlatProcessTransmitAesCcm(aFrame, &sExtAddress[aIndex]);
+
+    return OT_ERROR_NONE;
+}
+
+static otError sli_ot_radio_security_resolve_mac_transmit_key(otRadioFrame      *aFrame,
+                                                              instanceIndex_t    aIndex,
+                                                              uint8_t           *aKeyId,
+                                                              otMacKeyMaterial **aKeyMaterial)
+{
+    otError error = OT_ERROR_NONE;
+    uint8_t keyToUse;
+
+    if (otMacFrameIsAck(aFrame))
+    {
+        *aKeyId = otMacFrameGetKeyId(aFrame);
+
+        otEXPECT_ACTION(*aKeyId != 0, error = OT_ERROR_FAILED);
+
+        if (*aKeyId == sMacKeys[aIndex].keyId - 1)
+        {
+            keyToUse = static_cast<uint8_t>(MacKeyType::PREV);
+        }
+        else if (*aKeyId == sMacKeys[aIndex].keyId)
+        {
+            keyToUse = static_cast<uint8_t>(MacKeyType::CURRENT);
+        }
+        else if (*aKeyId == sMacKeys[aIndex].keyId + 1)
+        {
+            keyToUse = static_cast<uint8_t>(MacKeyType::NEXT);
+        }
+        else
+        {
+            ExitNow(error = OT_ERROR_SECURITY);
+        }
+    }
+    else
+    {
+        *aKeyId  = sMacKeys[aIndex].keyId;
+        keyToUse = static_cast<uint8_t>(MacKeyType::CURRENT);
+    }
+
+    *aKeyMaterial = &sMacKeys[aIndex].keys[keyToUse];
 
 exit:
     return error;
 }
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+
+static sli_ot_wake_guest_key_t *sli_ot_radio_security_find_guest_wake_key_entry(instanceIndex_t aIndex,
+                                                                                uint8_t         aKeyIndex)
+{
+    for (sli_ot_wake_guest_key_t &entry : sGuestWakeKeys[aIndex])
+    {
+        if (entry.mKeyIndex == aKeyIndex)
+        {
+            return &entry;
+        }
+    }
+
+    return nullptr;
+}
+
+static otMacKeyMaterial *sli_ot_radio_security_lookup_wake_key_material(instanceIndex_t aIndex, uint8_t aKeyIndex)
+{
+    sli_ot_wake_guest_key_t *entry = nullptr;
+
+    if (aKeyIndex == OT_MAC_FRAME_WAKE_KEY_INDEX)
+    {
+        return &sDefaultWakeKey[aIndex];
+    }
+
+    if (aKeyIndex < OT_MAC_FRAME_GUEST_WAKE_KEY_INDEX_MIN || aKeyIndex > OT_MAC_FRAME_GUEST_WAKE_KEY_INDEX_MAX)
+    {
+        return nullptr;
+    }
+
+    entry = sli_ot_radio_security_find_guest_wake_key_entry(aIndex, aKeyIndex);
+
+    return (entry != nullptr) ? &entry->mKey : nullptr;
+}
+
+static bool sli_ot_radio_security_wake_key_is_registered(const otMacKeyMaterial *aWakeKey)
+{
+    static const uint8_t kZero[OT_MAC_KEY_SIZE] = {0};
+
+    return memcmp(aWakeKey->mKeyMaterial.mKey.m8, kZero, OT_MAC_KEY_SIZE) != 0;
+}
+
+static otError sli_ot_radio_security_resolve_wake_transmit_key(instanceIndex_t    aIndex,
+                                                               uint8_t            aKeyId,
+                                                               otMacKeyMaterial **aKeyMaterial)
+{
+    otError           error   = OT_ERROR_NONE;
+    otMacKeyMaterial *wakeKey = sli_ot_radio_security_lookup_wake_key_material(aIndex, aKeyId);
+
+    otEXPECT_ACTION(wakeKey != nullptr && sli_ot_radio_security_wake_key_is_registered(wakeKey),
+                    error = OT_ERROR_SECURITY);
+
+    *aKeyMaterial = wakeKey;
+
+exit:
+    return error;
+}
+
+#endif // OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+
+otError sli_ot_radio_security_process_transmit(otRadioFrame *aFrame, otInstance *aInstance)
+{
+    otError            error = OT_ERROR_NONE;
+    uint8_t            keyId;
+    otMacKeyMaterial  *keyMaterial   = nullptr;
+    volatile uint32_t *frameCounter  = nullptr;
+    instanceIndex_t    instanceIndex = sli_ot_radio_instance_get_index(aInstance);
+
+    otEXPECT(otMacFrameIsSecurityEnabled(aFrame) && otMacFrameIsKeyIdMode1(aFrame)
+             && !aFrame->mInfo.mTxInfo.mIsSecurityProcessed);
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    keyId = otMacFrameGetKeyId(aFrame);
+
+    if (keyId >= OT_MAC_FRAME_WAKE_KEY_INDEX)
+    {
+        SuccessOrExit(error = sli_ot_radio_security_resolve_wake_transmit_key(instanceIndex, keyId, &keyMaterial));
+        frameCounter = &sMacKeys[instanceIndex].macFrameCounter;
+    }
+    else
+#endif
+    {
+        SuccessOrExit(error =
+                          sli_ot_radio_security_resolve_mac_transmit_key(aFrame, instanceIndex, &keyId, &keyMaterial));
+
+        frameCounter = &sMacKeys[instanceIndex].macFrameCounter;
+    }
+
+    error = sli_ot_radio_security_finish_transmit(aFrame, instanceIndex, keyMaterial, keyId, frameCounter);
+
+exit:
+    return error;
+}
+
 #ifdef LPWAES
 #if defined(KSU_PRESENT)
 static void sli_ot_radio_security_copy_key_to_ksu(instanceIndex_t index)
@@ -373,6 +501,102 @@ uint32_t sli_ot_radio_security_get_ack_frame_counter(otInstance *aInstance)
     instanceIndex_t index = sli_ot_radio_instance_get_index(aInstance);
     return sMacKeys[index].ackFrameCounter;
 }
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+
+// Exports PSA key bytes into the material's literal key field so the platform
+// AES-CCM path can access raw bytes. No-op on non-PSA builds.
+static void sli_wake_key_export_psa(otMacKeyMaterial *aDest)
+{
+#if (OPENTHREAD_CONFIG_CRYPTO_LIB == OPENTHREAD_CONFIG_CRYPTO_LIB_PSA)
+    size_t  keyLen;
+    otError error = otPlatCryptoExportKey(aDest->mKeyMaterial.mKeyRef,
+                                          aDest->mKeyMaterial.mKey.m8,
+                                          sizeof(aDest->mKeyMaterial.mKey.m8),
+                                          &keyLen);
+    OT_ASSERT(error == OT_ERROR_NONE);
+#else
+    OT_UNUSED_VARIABLE(aDest);
+#endif
+}
+
+static void sli_ot_radio_security_store_wake_key_material(otMacKeyMaterial *aDest, const otMacKeyMaterial *aWakeKey)
+{
+    if (aWakeKey != nullptr)
+    {
+        memcpy(aDest, aWakeKey, sizeof(otMacKeyMaterial));
+        sli_wake_key_export_psa(aDest);
+    }
+    else
+    {
+        memset(aDest, 0, sizeof(otMacKeyMaterial));
+    }
+}
+
+static void sli_ot_radio_security_set_default_wake_key(instanceIndex_t aIndex, const otMacKeyMaterial *aWakeKey)
+{
+    sli_ot_radio_security_store_wake_key_material(&sDefaultWakeKey[aIndex], aWakeKey);
+}
+
+static void sli_ot_radio_security_set_guest_wake_key(instanceIndex_t         aIndex,
+                                                     uint8_t                 aKeyIndex,
+                                                     const otMacKeyMaterial *aWakeKey)
+{
+    sli_ot_wake_guest_key_t *entry = sli_ot_radio_security_find_guest_wake_key_entry(aIndex, aKeyIndex);
+
+    if (entry != nullptr)
+    {
+        if (aWakeKey != nullptr)
+        {
+            sli_ot_radio_security_store_wake_key_material(&entry->mKey, aWakeKey);
+        }
+        else
+        {
+            memset(entry, 0, sizeof(*entry));
+        }
+
+        return;
+    }
+
+    if (aWakeKey == nullptr)
+    {
+        return;
+    }
+
+    for (sli_ot_wake_guest_key_t &slot : sGuestWakeKeys[aIndex])
+    {
+        if (slot.mKeyIndex != 0)
+        {
+            continue;
+        }
+
+        slot.mKeyIndex = aKeyIndex;
+        sli_ot_radio_security_store_wake_key_material(&slot.mKey, aWakeKey);
+        return;
+    }
+}
+
+void sli_ot_radio_security_set_wake_key(otInstance *aInstance, uint8_t aKeyIndex, const otMacKeyMaterial *aWakeKey)
+{
+    instanceIndex_t index = sli_ot_radio_instance_get_index(aInstance);
+
+    otEXPECT(sl_ot_rtos_task_can_access_pal());
+    otEXPECT_ACTION(aKeyIndex >= OT_MAC_FRAME_WAKE_KEY_INDEX && aKeyIndex <= OT_MAC_FRAME_GUEST_WAKE_KEY_INDEX_MAX,
+                    /* no-op */);
+
+    if (aKeyIndex == OT_MAC_FRAME_WAKE_KEY_INDEX)
+    {
+        sli_ot_radio_security_set_default_wake_key(index, aWakeKey);
+    }
+    else
+    {
+        sli_ot_radio_security_set_guest_wake_key(index, aKeyIndex, aWakeKey);
+    }
+
+exit:
+    return;
+}
+#endif // OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
 
 } // extern
 
