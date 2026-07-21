@@ -879,10 +879,7 @@ private:
         Ip6::Prefix     mLocalPrefix;         // The local prefix (from BR ULA prefix).
         Ip6::Prefix     mPublishedPrefix;     // The prefix to publish in Net Data (empty or local or from infra-if).
         RoutePreference mPublishedPreference; // The published prefix preference.
-#if OPENTHREAD_CONFIG_NAT64_FAVORED_PREFIX_NOTIFICATION_ENABLE
-        Ip6::Prefix mNotifiedFavoredPrefix;
-#endif
-        Nat64Timer mTimer;
+        Nat64Timer      mTimer;
     };
 
 #endif // OPENTHREAD_CONFIG_NAT64_BORDER_ROUTING_ENABLE

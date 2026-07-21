@@ -313,9 +313,9 @@ bool sli_ot_radio_interface_is_busy(void)
     return sli_ot_radio_state_is_transmitting_or_scanning();
 }
 
-void sli_ot_radio_interface_set_idle(sl_rail_handle_t aRailHandle, sl_rail_idle_mode_t aIdleMode, bool aWait)
+void sli_ot_radio_interface_set_idle(sl_rail_idle_mode_t aIdleMode, bool aWait)
 {
-    sl_rail_idle(aRailHandle, aIdleMode, aWait);
+    sl_rail_idle(gRailHandle, aIdleMode, aWait);
 }
 
 sl_rail_status_t sli_ot_radio_interface_config_rx_options(sl_rail_rx_options_t aOptions, sl_rail_rx_options_t aMask)

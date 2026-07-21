@@ -418,6 +418,41 @@ public:
                    const KeyMaterial &aCurrKey,
                    const KeyMaterial &aNextKey);
 
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    /**
+     * Registers or removes a Thread Direct Wake Key at the given key index.
+     *
+     * @param[in] aKeyIndex  Key index (OT_MAC_FRAME_WAKE_KEY_INDEX for default, 130-192 for guest).
+     * @param[in] aWakeKey   Key material, or nullptr to remove the key at @p aKeyIndex.
+     */
+    Error SetWakeKey(uint8_t aKeyIndex, const KeyMaterial *aWakeKey);
+
+    /**
+     * Sets the key index used to secure Wake Frames in the active burst.
+     *
+     * Called by WakeupTxScheduler when a burst starts or stops so that
+     * `ProcessTransmitSecurity` stamps the correct key index in each Wake Frame's
+     * Auxiliary Security Header.
+     *
+     * @param[in] aKeyIndex  Key index for the active burst, or OT_MAC_FRAME_WAKE_KEY_INDEX (129) when idle.
+     */
+#endif
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    void    SetActiveBurstWakeKeyIndex(uint8_t aKeyIndex) { mActiveBurstWakeKeyIndex = aKeyIndex; }
+    uint8_t GetActiveBurstWakeKeyIndex(void) const { return mActiveBurstWakeKeyIndex; }
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE && (OPENTHREAD_FTD || OPENTHREAD_MTD)
+    /**
+     * Returns true if a guest Wake Key has been provisioned at @p aKeyIndex via SetWakeKey().
+     *
+     * Used by the wake API to return OT_ERROR_INVALID_STATE before starting a burst with an
+     * unprovisioned guest key index, rather than silently dropping every frame in the burst.
+     */
+    bool IsGuestWakeKeyRegistered(uint8_t aKeyIndex) const;
+#endif
+#endif
+
     /**
      * Returns a reference to the current MAC key.
      *
@@ -465,6 +500,24 @@ public:
      */
     void SetFrameCounter(uint32_t aFrameCounter, bool aSetIfLarger);
 
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    /**
+     * Returns the current Thread Direct wake frame counter value.
+     *
+     * @returns The current wake frame counter value.
+     */
+    uint32_t GetWakeFrameCounter(void) const { return mWakeFrameCounter; }
+
+    /**
+     * Sets the Thread Direct wake frame counter value.
+     *
+     * @param[in] aWakeFrameCounter  The wake frame counter value.
+     * @param[in] aSetIfLarger       If `true`, set only if @p aWakeFrameCounter is larger than the current value.
+     *                               If `false`, set the new value independent of the current value.
+     */
+    void SetWakeFrameCounter(uint32_t aWakeFrameCounter, bool aSetIfLarger);
+#endif
+
 #if OPENTHREAD_CONFIG_MAC_FILTER_ENABLE
     /**
      * Enables/disables the radio filter.
@@ -486,14 +539,65 @@ public:
     bool IsRadioFilterEnabled(void) const { return mRadioFilterEnabled; }
 #endif
 
-#if OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
     /**
-     * Configures wake-up listening parameters in all radios.
+     * Configures local Thread Direct SLW receive scheduling.
      *
-     * @param[in]  aEnable    Whether to enable or disable wake-up listening.
-     * @param[in]  aInterval  The wake-up listen interval in microseconds.
-     * @param[in]  aDuration  The wake-up listen duration in microseconds.
-     * @param[in]  aChannel   The wake-up channel.
+     * When enabling, the first local sample point is anchored either to the
+     * provided radio timestamp or, when `aSampleTimeRadio` is zero, to the
+     * current radio time.
+     *
+     * @param[in]  aEnable          Whether to enable or disable local SLW scheduling.
+     * @param[in]  aPeriodUs        The local SLW period in microseconds.
+     * @param[in]  aPeriodSlots     The SLW period in slot-duration units advertised to peers.
+     * @param[in]  aSlotDurationUs  The advertised SLW Slot Duration, in microseconds.
+     * @param[in]  aChannel         The Thread channel used for SLW sampling.
+     * @param[in]  aSampleTimeRadio Desired first SLW sample time in radio microseconds,
+     *                              or zero to anchor from the current radio time.
+     */
+    void UpdateThreadDirectSlw(bool     aEnable,
+                               uint32_t aPeriodUs,
+                               uint16_t aPeriodSlots,
+                               uint32_t aSlotDurationUs,
+                               uint8_t  aChannel,
+                               uint32_t aSampleTimeRadio = 0);
+
+    /**
+     * Computes the SLW phase in slots at the moment of the call.
+     *
+     * Returns the number of @p aSlotDurationUs-wide slots until the next SLW sample
+     * point, measured in radio clock time.  Returns 0 when the local SLW schedule is
+     * not yet running (e.g. before link establishment) or the inputs are invalid.
+     *
+     * @param[in] aSlotDurationUs  Slot duration in microseconds (must be non-zero).
+     *
+     * @returns Phase in slots, or 0 if SLW is not running.
+     */
+    uint16_t ComputeSlwPhaseSlots(uint32_t aSlotDurationUs) const;
+
+    /**
+     * Computes the SLW phase (in slots) relative to a specified reference radio time.
+     *
+     * Unlike `ComputeSlwPhaseSlots`, which uses the current radio time, this variant computes
+     * the phase from an explicit reference point — typically the scheduled TX time of a frame.
+     * Use this to embed an accurate phase in a frame header at TX-scheduling time.
+     *
+     * @param[in] aRefTimeUs      Reference radio time in µs (e.g., scheduled TX timestamp).
+     * @param[in] aSlotDurationUs Slot duration in µs (625 for Thread Direct SCA).
+     *
+     * @returns Phase in slots from @p aRefTimeUs to the next SLW window, or 0 if SLW is not running.
+     */
+    uint16_t ComputeSlwPhaseSlotsAt(uint32_t aRefTimeUs, uint32_t aSlotDurationUs) const;
+#endif
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    /**
+     * Configures Wake Listener (WL) listen parameters.
+     *
+     * @param[in]  aEnable    Whether to enable or disable WL listening.
+     * @param[in]  aInterval  The WL listen interval in microseconds
+     * @param[in]  aDuration  The WL listen window duration in microseconds
+     * @param[in]  aChannel   The Wake Channel (default: channel 20).
      */
     void UpdateWakeupListening(bool aEnable, uint32_t aInterval, uint32_t aDuration, uint8_t aChannel);
 #endif
@@ -508,7 +612,6 @@ private:
     void        HandleCslTimer(void);
     void        GetCslWindowEdges(uint32_t &aAhead, uint32_t &aAfter);
     uint32_t    GetNextCycleDrift(void);
-    uint32_t    GetLocalTime(void);
     bool        IsCslEnabled(void) const { return mCslPeriod > 0; }
 #if OPENTHREAD_CONFIG_MAC_CSL_DEBUG_ENABLE
     void LogReceived(RxFrame *aFrame);
@@ -517,12 +620,27 @@ private:
     void HandleCslReceiveOrSleep(uint32_t aTimeAhead, uint32_t aTimeAfter);
     void LogCslWindow(uint32_t aWinStart, uint32_t aWinDuration);
 #endif
-#if OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
-    void        WedInit(void);
-    static void HandleWedTimer(Timer &aTimer);
-    void        HandleWedTimer(void);
-    void        HandleWedReceiveAt(void);
-    void        HandleWedReceiveOrSleep(void);
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    void        WlInit(void);
+    static void HandleWlTimer(Timer &aTimer);
+    void        HandleWlTimer(void);
+    void        HandleWlReceiveAt(void);
+    void        HandleWlReceiveOrSleep(void);
+#endif
+#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE || \
+    OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+    uint32_t GetLocalTime(void) const;
+#endif
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+    void        ThreadDirectSlwInit(void);
+    void        StartThreadDirectSlwAtSampleTime(uint32_t aSampleTimeRadio);
+    static void HandleThreadDirectSlwTimer(Timer &aTimer);
+    void        HandleThreadDirectSlwTimer(void);
+    void        HandleThreadDirectSlwReceiveAt(uint32_t aTimeAhead, uint32_t aTimeAfter);
+    void        HandleThreadDirectSlwReceiveOrSleep(uint32_t aTimeAhead, uint32_t aTimeAfter);
+    void        GetThreadDirectSlwWindowEdges(uint32_t &aAhead, uint32_t &aAfter) const;
+    uint32_t    GetThreadDirectNextCycleDrift(void) const;
+    void        LogThreadDirectSlwWindow(uint32_t aWinStart, uint32_t aWinDuration) const;
 #endif
 
     static constexpr uint8_t  kCsmaMinBe         = 3;                  // macMinBE (IEEE 802.15.4-2006).
@@ -556,26 +674,28 @@ private:
 #if !OPENTHREAD_MTD && OPENTHREAD_CONFIG_MAC_CSL_TRANSMITTER_ENABLE
         kStateCslTransmit, // CSL transmission.
 #endif
-#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE || OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
+#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE || \
+    OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
         kStateRadioSample, // Mac layer has requested the SubMac to enter sleep state, but the SubMac is in the periodic
                            // sample state.
 #endif
     };
 
-#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE || OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
+#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE || \
+    OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
     // Radio on times needed before and after MHR time for proper frame detection
     static constexpr uint32_t kMinReceiveOnAhead = OPENTHREAD_CONFIG_MIN_RECEIVE_ON_AHEAD;
     static constexpr uint32_t kMinReceiveOnAfter = OPENTHREAD_CONFIG_MIN_RECEIVE_ON_AFTER;
 
-    // CSL/wake-up listening receivers would wake up `kCslReceiveTimeAhead` earlier
-    // than expected sample window. The value is in usec.
+    // CSL / Thread Direct SLW / WL receivers start listening `kCslReceiveTimeAhead`
+    // before the expected sample point.
+    // The value is in usec.
     static constexpr uint32_t kCslReceiveTimeAhead = OPENTHREAD_CONFIG_CSL_RECEIVE_TIME_AHEAD;
 #endif
 
-#if OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
-    // Margin to be applied after the end of a wake-up listen duration to schedule the next listen interval.
-    // The value is in usec.
-    static constexpr uint32_t kWedReceiveTimeAfter = OPENTHREAD_CONFIG_WED_RECEIVE_TIME_AFTER;
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+    // Margin applied after the end of a WL listen window before scheduling the next listen interval, in usec.
+    static constexpr uint32_t kWlReceiveTimeAfter = OPENTHREAD_CONFIG_THREAD_DIRECT_LISTEN_RECEIVE_TIME_AFTER;
 #endif
 
 #if OPENTHREAD_CONFIG_MAC_CSL_TRANSMITTER_ENABLE
@@ -632,10 +752,42 @@ private:
     void               SetState(State aState);
     static const char *StateToString(State aState);
 
-#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE || OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
+#if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE || \
+    OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
     bool IsRadioSampleEnabled(void) const;
     void UpdateRadioSampleState(void);
     void RadioSample(void);
+    void AdvancePeriodicSampleTime(TimeMicro &aSampleTimeLocal, uint32_t &aSampleTimeRadio, uint32_t aPeriodUs);
+    void HandlePeriodicReceiveAt(TimerMicro &aTimer,
+                                 TimeMicro   aNextTimerFireTime,
+                                 TimeMicro  &aSampleTimeLocal,
+                                 uint32_t   &aSampleTimeRadio,
+                                 uint32_t    aPeriodUs,
+                                 uint8_t     aChannel,
+                                 uint32_t    aWinStart,
+                                 uint32_t    aWinDuration);
+    bool HandlePeriodicReceiveOrSleep(TimerMicro &aTimer,
+                                      bool       &aIsSampling,
+                                      TimeMicro   aSleepFireTime,
+                                      TimeMicro   aSampleFireTime,
+                                      TimeMicro  &aSampleTimeLocal,
+                                      uint32_t   &aSampleTimeRadio,
+                                      uint32_t    aPeriodUs);
+    static uint32_t CalculatePeriodicSampleDrift(uint64_t aElapsedUs,
+                                                 uint16_t aLocalClockAccuracy,
+                                                 uint16_t aPeerClockAccuracy);
+    static uint32_t CalculatePeriodicSampleUncertainty(uint16_t aLocalUncertaintyUs, uint16_t aPeerUncertaintyUs);
+    void            CalculatePeriodicSampleWindowEdges(uint32_t  aPeriodUs,
+                                                       uint64_t  aElapsedUs,
+                                                       uint8_t   aLocalClockAccuracy,
+                                                       uint16_t  aLocalUncertaintyUs,
+                                                       uint8_t   aPeerClockAccuracy,
+                                                       uint16_t  aPeerUncertaintyUs,
+                                                       uint32_t &aAhead,
+                                                       uint32_t &aAfter) const;
+    uint32_t        CalculatePeriodicSamplePeriodDrift(uint32_t aPeriodUs,
+                                                       uint8_t  aLocalClockAccuracy,
+                                                       uint8_t  aPeerClockAccuracy) const;
 #endif
 
     using SubMacTimer =
@@ -666,6 +818,10 @@ private:
     KeyMaterial                  mNextKey;
     uint32_t                     mFrameCounter;
     uint8_t                      mKeyId;
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    uint8_t  mActiveBurstWakeKeyIndex; // Key index stamped in Wake/Link frames for the active TD operation.
+    uint32_t mWakeFrameCounter;        // Wake key frame counter (key index 129+), not mFrameCounter / mKeyId.
+#endif
 #if OPENTHREAD_CONFIG_MAC_ADD_DELAY_ON_NO_ACK_ERROR_BEFORE_RETRY
     uint8_t mRetxDelayBackOffExponent;
 #endif
@@ -684,16 +840,28 @@ private:
     TimerMicro  mCslTimer;
 #endif
 
-#if OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
-    bool mIsWedSampling : 1;          // Indicates that the current time is in WED's sample window
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+    bool mIsThreadDirectSlwSampling : 1;        // Indicates local Thread Direct SLW sample window for
+                                                // platforms not supporting `Radio::ReceiveAt()`.
+    bool       mIsThreadDirectSlwEnabled : 1;   // Indicates if local Thread Direct SLW scheduling is enabled.
+    uint8_t    mThreadDirectSlwChannel;         // Thread channel used for local SLW sampling.
+    uint32_t   mThreadDirectSlwPeriod;          // Local SLW period in microseconds.
+    TimeMicro  mThreadDirectSlwLastSync;        // TD timing anchor for drift/uncertainty window growth.
+    uint32_t   mThreadDirectSlwSampleTimeRadio; // The TD SLW sample time of the current period based on radio time.
+    TimeMicro  mThreadDirectSlwSampleTimeLocal;
+    TimerMicro mThreadDirectSlwTimer;
+#endif
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    bool mIsWlSampling : 1;           // Indicates that the current time is in the WL sample window
                                       // for platforms not supporting `Radio::ReceiveAt()`.
-    bool       mIsWedEnabled : 1;     // Indicates if the WED is enabled.
-    uint32_t   mWakeupListenInterval; // The wake-up listen interval, in microseconds.
-    uint32_t   mWakeupListenDuration; // The wake-up listen duration, in microseconds.
-    uint8_t    mWakeupChannel;        // The wake-up sample channel.
-    TimeMicro  mWedSampleTime;        // The WED sample time of the current interval in local time.
-    uint64_t   mWedSampleTimeRadio;   // The WED sample time of the current interval in radio time.
-    TimerMicro mWedTimer;
+    bool       mIsWlEnabled : 1;      // Indicates if WL listen mode is enabled.
+    uint32_t   mWakeupListenInterval; // WL listen interval, in microseconds.
+    uint32_t   mWakeupListenDuration; // WL listen window duration, in microseconds.
+    uint8_t    mWakeupChannel;        // Wake Channel (spec ; default channel 20).
+    TimeMicro  mWlSampleTime;         // WL sample time of the current interval in local time.
+    uint64_t   mWlSampleTimeRadio;    // WL sample time of the current interval in radio time.
+    TimerMicro mWlTimer;
 #endif
 };
 

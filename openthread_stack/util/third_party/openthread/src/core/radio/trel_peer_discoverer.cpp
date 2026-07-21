@@ -42,9 +42,8 @@ namespace Trel {
 RegisterLogModule("TrelDiscoverer");
 
 #if OPENTHREAD_CONFIG_TREL_MANAGE_DNSSD_ENABLE
-
 const char PeerDiscoverer::kTrelServiceType[] = "_trel._udp";
-#endif // OPENTHREAD_CONFIG_TREL_MANAGE_DNSSD_ENABLE
+#endif
 
 PeerDiscoverer::PeerDiscoverer(Instance &aInstance)
     : InstanceLocator(aInstance)
@@ -53,9 +52,6 @@ PeerDiscoverer::PeerDiscoverer(Instance &aInstance)
 #if OPENTHREAD_CONFIG_TREL_MANAGE_DNSSD_ENABLE
     , mServiceName(aInstance)
     , mBrowsing(false)
-#if OPENTHREAD_CONFIG_TREL_DNSSD_DISCOVERY_STABILIZATION_ENABLE
-    , mBrowseRemoveDebounceTimer(aInstance)
-#endif
 #endif
 {
 }
@@ -91,11 +87,6 @@ void PeerDiscoverer::Stop(void)
     VerifyOrExit(mState != kStateStopped);
 
     mState = kStateStopped;
-
-#if OPENTHREAD_CONFIG_TREL_DNSSD_DISCOVERY_STABILIZATION_ENABLE
-    mBrowseRemoveDebounceTimer.Stop();
-#endif
-
     Get<PeerTable>().Clear();
 
 #if OPENTHREAD_CONFIG_TREL_MANAGE_DNSSD_ENABLE
@@ -154,12 +145,7 @@ void PeerDiscoverer::RegisterService(void)
     TxtDataEncoder txtData(GetInstance());
     uint16_t       port;
 
-#if OPENTHREAD_CONFIG_TREL_DELEGATE_INFRA_TO_HOST_ENABLE
-    port = Get<Interface>().GetHostUdpPort();
-    VerifyOrExit(port != 0);
-#else
     port = Get<Interface>().GetUdpPort();
-#endif
 
     txtData.Encode();
 
@@ -169,11 +155,6 @@ void PeerDiscoverer::RegisterService(void)
     LogInfo("Registering DNS-SD service: port:%u", port);
     otPlatTrelRegisterService(&GetInstance(), port, txtData.GetBytes(), static_cast<uint8_t>(txtData.GetLength()));
 #endif
-
-#if OPENTHREAD_CONFIG_TREL_DELEGATE_INFRA_TO_HOST_ENABLE
-exit:
-#endif
-    return;
 }
 
 #if !OPENTHREAD_CONFIG_TREL_MANAGE_DNSSD_ENABLE
@@ -280,12 +261,8 @@ void PeerDiscoverer::HandleDnssdPlatformStateChange(void)
     else
     {
         VerifyOrExit(mState != kStateStopped);
-
         mState    = kStatePendingDnssd;
         mBrowsing = false;
-#if OPENTHREAD_CONFIG_TREL_DNSSD_DISCOVERY_STABILIZATION_ENABLE
-        mBrowseRemoveDebounceTimer.Stop();
-#endif
         Get<PeerTable>().Clear();
     }
 
@@ -356,123 +333,6 @@ void PeerDiscoverer::HandleBrowseResult(otInstance *aInstance, const otPlatDnssd
     AsCoreType(aInstance).Get<PeerDiscoverer>().HandleBrowseResult(*aResult);
 }
 
-#if OPENTHREAD_CONFIG_TREL_DNSSD_DISCOVERY_STABILIZATION_ENABLE
-
-bool PeerDiscoverer::IsStaleResolveCallback(const Peer &aPeer, uint8_t aCallbackEpoch)
-{
-    return aPeer.mResolveEpoch != aCallbackEpoch;
-}
-
-void PeerDiscoverer::BumpResolveEpoch(Peer &aPeer) { ++aPeer.mResolveEpoch; }
-
-void PeerDiscoverer::ResetPeerResolveState(Peer &aPeer)
-{
-    // Stop host resolver before service resolvers clear `mHostName`.
-    StopHostAddressResolver(aPeer);
-    StopServiceResolvers(aPeer);
-
-    aPeer.mTxtDataValidated = false;
-    aPeer.mPort             = 0;
-    aPeer.mHostAddresses.Free();
-}
-
-void PeerDiscoverer::ConfirmBrowseRemove(Peer &aPeer)
-{
-    BumpResolveEpoch(aPeer);
-    // Keep `mHostResolveEpoch` in sync so a late AAAA from the resolver stopped in
-    // `HandlePeerRemoval()` can still be applied while the peer is `removed`.
-    aPeer.mHostResolveEpoch = aPeer.mResolveEpoch;
-    aPeer.SetDnssdState(Peer::kDnssdRemoved);
-    aPeer.Log(Peer::kUpdated);
-}
-
-void PeerDiscoverer::BeginBrowseRefresh(Peer &aPeer)
-{
-    aPeer.mBrowseRemovePending = false;
-
-    BumpResolveEpoch(aPeer);
-    ResetPeerResolveState(aPeer);
-    aPeer.SetDnssdState(Peer::kDnssdResolving);
-    aPeer.Log(Peer::kReAdded);
-
-    StartServiceResolvers(aPeer);
-}
-
-void PeerDiscoverer::BeginBrowseSoftRefresh(Peer &aPeer)
-{
-    aPeer.mBrowseRemovePending = false;
-
-    VerifyOrExit(!aPeer.mHostName.IsNull(), BeginBrowseRefresh(aPeer));
-
-    BumpResolveEpoch(aPeer);
-    aPeer.mTxtDataValidated = false;
-    aPeer.mPort             = 0;
-
-    if (aPeer.mResolvingService)
-    {
-        StopServiceResolvers(aPeer, /* aPreserveHostName */ true);
-    }
-
-    if (aPeer.mHostAddresses.GetLength() > 0)
-    {
-        aPeer.mHostResolveEpoch = aPeer.mResolveEpoch;
-        aPeer.mResolvingHost    = true;
-    }
-    else
-    {
-        StartHostAddressResolver(aPeer);
-    }
-
-    aPeer.SetDnssdState(Peer::kDnssdResolving);
-    aPeer.Log(Peer::kReAdded);
-    StartServiceResolvers(aPeer);
-
-exit:
-    return;
-}
-
-void PeerDiscoverer::UpdateBrowseRemoveDebounceTimer(void)
-{
-    bool hasPending = false;
-
-    for (const Peer &peer : Get<PeerTable>())
-    {
-        if (peer.mBrowseRemovePending)
-        {
-            hasPending = true;
-            break;
-        }
-    }
-
-    if (hasPending)
-    {
-        mBrowseRemoveDebounceTimer.FireAtIfEarlier(TimerMilli::GetNow() + kBrowseRemoveDebounceMsec);
-    }
-    else
-    {
-        mBrowseRemoveDebounceTimer.Stop();
-    }
-}
-
-void PeerDiscoverer::HandleBrowseRemoveDebounceTimer(void)
-{
-    for (Peer &peer : Get<PeerTable>())
-    {
-        if (!peer.mBrowseRemovePending)
-        {
-            continue;
-        }
-
-        peer.mBrowseRemovePending = false;
-
-        ConfirmBrowseRemove(peer);
-    }
-
-    UpdateBrowseRemoveDebounceTimer();
-}
-
-#endif // OPENTHREAD_CONFIG_TREL_DNSSD_DISCOVERY_STABILIZATION_ENABLE
-
 void PeerDiscoverer::HandleBrowseResult(const Dnssd::BrowseResult &aResult)
 {
     Peer *peer;
@@ -485,47 +345,14 @@ void PeerDiscoverer::HandleBrowseResult(const Dnssd::BrowseResult &aResult)
     {
         // Previously discovered service is now removed.
 
-#if OPENTHREAD_CONFIG_TREL_DNSSD_DISCOVERY_STABILIZATION_ENABLE
-        VerifyOrExit(peer != nullptr);
-
-        peer->mBrowseRemovePending = true;
-        UpdateBrowseRemoveDebounceTimer();
-#else
         VerifyOrExit(peer != nullptr);
         peer->SetDnssdState(Peer::kDnssdRemoved);
         peer->Log(Peer::kUpdated);
-#endif
     }
     else
     {
         // A new service is discovered.
 
-#if OPENTHREAD_CONFIG_TREL_DNSSD_DISCOVERY_STABILIZATION_ENABLE
-        if (peer == nullptr)
-        {
-            peer = Get<PeerTable>().AllocateAndAddNewPeer();
-            VerifyOrExit(peer != nullptr);
-            SuccessOrAssert(peer->mServiceName.Set(aResult.mServiceInstance));
-            peer->SetDnssdState(Peer::kDnssdResolving);
-            peer->Log(Peer::kAdded);
-            StartServiceResolvers(*peer);
-        }
-        else if (peer->mBrowseRemovePending)
-        {
-            BeginBrowseSoftRefresh(*peer);
-            UpdateBrowseRemoveDebounceTimer();
-        }
-        else if (peer->GetDnssdState() == Peer::kDnssdRemoved)
-        {
-            BeginBrowseSoftRefresh(*peer);
-        }
-        else
-        {
-            peer->SetDnssdState(Peer::kDnssdResolving);
-            peer->Log(Peer::kReAdded);
-            StartServiceResolvers(*peer);
-        }
-#else
         Peer::Action action = Peer::kAdded;
 
         if (peer == nullptr)
@@ -543,7 +370,6 @@ void PeerDiscoverer::HandleBrowseResult(const Dnssd::BrowseResult &aResult)
         peer->Log(action);
 
         StartServiceResolvers(*peer);
-#endif
     }
 
 exit:
@@ -554,9 +380,6 @@ void PeerDiscoverer::StartServiceResolvers(Peer &aPeer)
 {
     VerifyOrExit(!aPeer.mResolvingService);
 
-#if OPENTHREAD_CONFIG_TREL_DNSSD_DISCOVERY_STABILIZATION_ENABLE
-    aPeer.mSrvTxtResolveEpoch = aPeer.mResolveEpoch;
-#endif
     aPeer.mResolvingService = true;
     Get<Dnssd>().StartSrvResolver(SrvResolver(aPeer));
     Get<Dnssd>().StartTxtResolver(TxtResolver(aPeer));
@@ -567,9 +390,6 @@ exit:
 
 void PeerDiscoverer::StopServiceResolvers(Peer &aPeer)
 {
-#if OPENTHREAD_CONFIG_TREL_DNSSD_DISCOVERY_STABILIZATION_ENABLE
-    StopServiceResolvers(aPeer, false);
-#else
     VerifyOrExit(aPeer.mResolvingService);
 
     aPeer.mResolvingService = false;
@@ -582,30 +402,7 @@ void PeerDiscoverer::StopServiceResolvers(Peer &aPeer)
 
 exit:
     return;
-#endif
 }
-
-#if OPENTHREAD_CONFIG_TREL_DNSSD_DISCOVERY_STABILIZATION_ENABLE
-void PeerDiscoverer::StopServiceResolvers(Peer &aPeer, bool aPreserveHostName)
-{
-    VerifyOrExit(aPeer.mResolvingService);
-
-    aPeer.mResolvingService = false;
-    aPeer.mTxtDataValidated = false;
-    aPeer.mPort             = 0;
-
-    if (!aPreserveHostName)
-    {
-        aPeer.mHostName.Free();
-    }
-
-    Get<Dnssd>().StopSrvResolver(SrvResolver(aPeer));
-    Get<Dnssd>().StopTxtResolver(TxtResolver(aPeer));
-
-exit:
-    return;
-}
-#endif // OPENTHREAD_CONFIG_TREL_DNSSD_DISCOVERY_STABILIZATION_ENABLE
 
 void PeerDiscoverer::HandleSrvResult(otInstance *aInstance, const otPlatDnssdSrvResult *aResult)
 {
@@ -620,10 +417,6 @@ void PeerDiscoverer::HandleSrvResult(const Dnssd::SrvResult &aResult)
 
     peer = Get<PeerTable>().FindMatching(Peer::kMatchServiceName, aResult.mServiceInstance);
     VerifyOrExit(peer != nullptr);
-#if OPENTHREAD_CONFIG_TREL_DNSSD_DISCOVERY_STABILIZATION_ENABLE
-    VerifyOrExit(!peer->mBrowseRemovePending);
-    VerifyOrExit(!IsStaleResolveCallback(*peer, peer->mSrvTxtResolveEpoch));
-#endif
 
     if (aResult.mTtl == 0)
     {
@@ -640,16 +433,6 @@ void PeerDiscoverer::HandleSrvResult(const Dnssd::SrvResult &aResult)
             SuccessOrAssert(peer->mHostName.Set(aResult.mHostName));
             StartHostAddressResolver(*peer);
         }
-#if OPENTHREAD_CONFIG_TREL_DNSSD_DISCOVERY_STABILIZATION_ENABLE
-        else if (peer->mHostAddresses.GetLength() == 0)
-        {
-            if (peer->mHostName.IsNull())
-            {
-                SuccessOrAssert(peer->mHostName.Set(aResult.mHostName));
-            }
-            StartHostAddressResolver(*peer);
-        }
-#endif
     }
 
     UpdatePeerState(*peer);
@@ -673,10 +456,6 @@ void PeerDiscoverer::HandleTxtResult(const Dnssd::TxtResult &aResult)
 
     peer = Get<PeerTable>().FindMatching(Peer::kMatchServiceName, aResult.mServiceInstance);
     VerifyOrExit(peer != nullptr);
-#if OPENTHREAD_CONFIG_TREL_DNSSD_DISCOVERY_STABILIZATION_ENABLE
-    VerifyOrExit(!peer->mBrowseRemovePending);
-    VerifyOrExit(!IsStaleResolveCallback(*peer, peer->mSrvTxtResolveEpoch));
-#endif
 
     peer->mTxtDataValidated = false;
 
@@ -712,12 +491,6 @@ void PeerDiscoverer::HandleTxtResult(const Dnssd::TxtResult &aResult)
 exit:
     if (peer != nullptr)
     {
-#if OPENTHREAD_CONFIG_TREL_DNSSD_DISCOVERY_STABILIZATION_ENABLE
-        if (peer->mTxtDataValidated && (peer->mHostAddresses.GetLength() == 0) && !peer->mHostName.IsNull())
-        {
-            StartHostAddressResolver(*peer);
-        }
-#endif
         UpdatePeerState(*peer);
     }
 }
@@ -726,31 +499,13 @@ void PeerDiscoverer::StartHostAddressResolver(Peer &aPeer)
 {
     Peer *sameHostPeer;
 
-#if OPENTHREAD_CONFIG_TREL_DNSSD_DISCOVERY_STABILIZATION_ENABLE
-    // Re-issue lookup when a resolver is already marked active but no usable addresses yet
-    // (e.g. SRV/TXT were ignored during browse REMOVE debounce).
-    VerifyOrExit(!aPeer.mResolvingHost || aPeer.mHostAddresses.GetLength() == 0);
-
-    if (aPeer.mResolvingHost)
-    {
-        aPeer.mResolvingHost = false;
-    }
-#else
     VerifyOrExit(!aPeer.mResolvingHost);
-#endif
 
     sameHostPeer = Get<PeerTable>().FindMatching(Peer::kMatchHostName, aPeer.mHostName.AsCString());
 
-#if OPENTHREAD_CONFIG_TREL_DNSSD_DISCOVERY_STABILIZATION_ENABLE
-    aPeer.mHostResolveEpoch = aPeer.mResolveEpoch;
-#endif
     aPeer.mResolvingHost = true;
 
-#if OPENTHREAD_CONFIG_TREL_DNSSD_DISCOVERY_STABILIZATION_ENABLE
-    if ((sameHostPeer != nullptr) && (sameHostPeer->mHostAddresses.GetLength() > 0))
-#else
     if (sameHostPeer != nullptr)
-#endif
     {
         UpdatePeerAddresses(aPeer, sameHostPeer->mHostAddresses);
     }
@@ -852,26 +607,10 @@ void PeerDiscoverer::HandleAddressResult(const Dnssd::AddressResult &aResult)
 
     for (Peer &peer : Get<PeerTable>())
     {
-#if OPENTHREAD_CONFIG_TREL_DNSSD_DISCOVERY_STABILIZATION_ENABLE
-        if (IsStaleResolveCallback(peer, peer.mHostResolveEpoch))
-        {
-            continue;
-        }
-
-        if (peer.GetDnssdState() == Peer::kDnssdRemoved)
-        {
-            if (peer.Matches(Peer::kMatchHostName, aResult.mHostName))
-            {
-                UpdatePeerAddresses(peer, sortedAddresses);
-            }
-            continue;
-        }
-#else
         if (peer.GetDnssdState() == Peer::kDnssdRemoved)
         {
             continue;
         }
-#endif
 
         if (peer.Matches(Peer::kMatchHostName, aResult.mHostName))
         {
@@ -978,18 +717,9 @@ void PeerDiscoverer::HandlePeerRemoval(Peer &aPeer)
     // The order of calls is important here since the
     // `StopServiceResolvers()` clears the `aPeer.mHostName` which
     // would be needed in `StopHostAddressResolver()`.
-#if OPENTHREAD_CONFIG_TREL_DNSSD_DISCOVERY_STABILIZATION_ENABLE
-    // With stabilization enabled, the overload below passes
-    // `aPreserveHostName` as true, so `mHostName` is kept on the peer
-    // while SRV/TXT resolvers are stopped.
-#endif
 
     StopHostAddressResolver(aPeer);
-#if OPENTHREAD_CONFIG_TREL_DNSSD_DISCOVERY_STABILIZATION_ENABLE
-    StopServiceResolvers(aPeer, /* aPreserveHostName */ true);
-#else
     StopServiceResolvers(aPeer);
-#endif
 }
 
 #endif // OPENTHREAD_CONFIG_TREL_MANAGE_DNSSD_ENABLE

@@ -2290,9 +2290,6 @@ RoutingManager::Nat64PrefixManager::Nat64PrefixManager(Instance &aInstance)
     mPlatformPrefix.Clear();
     mLocalPrefix.Clear();
     mPublishedPrefix.Clear();
-#if OPENTHREAD_CONFIG_NAT64_FAVORED_PREFIX_NOTIFICATION_ENABLE
-    mNotifiedFavoredPrefix.Clear();
-#endif
 }
 
 void RoutingManager::Nat64PrefixManager::SetEnabled(bool aEnabled)
@@ -2389,16 +2386,6 @@ void RoutingManager::Nat64PrefixManager::Evaluate(void)
     LogInfo("Evaluating NAT64 prefix");
 
     prefix = GetFavoredPrefix(preference);
-
-#if OPENTHREAD_CONFIG_NAT64_FAVORED_PREFIX_NOTIFICATION_ENABLE
-    if (prefix != mNotifiedFavoredPrefix)
-    {
-        mNotifiedFavoredPrefix = prefix;
-        otPlatBorderRoutingFavoredNat64PrefixChanged(&GetInstance());
-    }
-#endif
-
-    VerifyOrExit(prefix.IsValidNat64(), Unpublish());
 
     error = Get<NetworkData::Leader>().FindPreferredNat64Prefix(netdataPrefixConfig);
 
@@ -3092,11 +3079,6 @@ extern "C" void otPlatBorderRoutingProcessDhcp6PdPrefix(otInstance              
 #endif // !OPENTHREAD_CONFIG_BORDER_ROUTING_DHCP6_PD_CLIENT_ENABLE
 
 #endif // OPENTHREAD_CONFIG_BORDER_ROUTING_DHCP6_PD_ENABLE
-
-extern "C" OT_TOOL_WEAK void otPlatBorderRoutingFavoredNat64PrefixChanged(otInstance *aInstance)
-{
-    OT_UNUSED_VARIABLE(aInstance);
-}
 
 } // namespace BorderRouter
 

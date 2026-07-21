@@ -41,6 +41,7 @@
 #include "common/encoding.hpp"
 #include "common/numeric_limits.hpp"
 #include "mac/mac_header_ie.hpp"
+#include "mac/mac_header_ltv.hpp"
 #include "mac/mac_types.hpp"
 #include "meshcop/network_name.hpp"
 
@@ -129,7 +130,41 @@ public:
         kMacCmdBeaconRequest              = 7,
         kMacCmdCoordinatorRealignment     = 8,
         kMacCmdGtsRequest                 = 9,
+        kMacCmdDirect                     = 0x54, ///< Thread Direct MAC Command (IEEE 802.15.4 vendor-specific command)
     };
+
+    /**
+     * Thread MAC Command IDs - byte 1 of the kMacCmdDirect (0x54) payload.
+     */
+    enum ThreadMacCmdId : uint8_t
+    {
+        kThreadMacCmdAdvertisement = 0x00,
+        kThreadMacCmdWake          = 0x01,
+        kThreadMacCmdDirectLink    = 0x02,
+    };
+
+    /**
+     * TD Link Command Link Parameter Mask bit definitions.
+     */
+    enum LinkParamMask : uint8_t
+    {
+        kLinkParamMaskSupervisionInterval = 1 << 0, ///< Supervision Interval field present.
+        kLinkParamMaskServices            = 1 << 1, ///< Services bitmap field present.
+        // Bit 2 is reserved.
+    };
+
+    /**
+     * Wake Frame Type - byte 2 of the Thread Wake Command payload.
+     */
+    enum WakeFrameType : uint8_t
+    {
+        kWakeFrameTypeDirectLink     = 0x00,
+        kWakeFrameTypePowerOutage    = 0x01,
+        kWakeFrameTypeConnectionless = 0x02,
+    };
+
+    static constexpr uint8_t kWakeKeyIndex =
+        129; ///< Key index for the TD Wake Key. Must equal OT_MAC_FRAME_WAKE_KEY_INDEX.
 
     static constexpr uint16_t kInfoStringSize = 128; ///< Max chars for `InfoString` (ToInfoString()).
 
@@ -186,53 +221,33 @@ public:
      */
     bool IsMacCommand(void) const { return GetType() == kTypeMacCmd; }
 
-#if OPENTHREAD_CONFIG_WAKEUP_COORDINATOR_ENABLE || OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
     /**
      * This method returns whether the frame is an IEEE 802.15.4 Wake-up frame.
      *
      * @retval TRUE   If this is a Wake-up frame.
      * @retval FALSE  If this is not a Wake-up frame.
      */
-    bool IsWakeupFrame(void) const;
+    bool IsTdWakeCommand(void) const;
 
     /**
-     * This method returns the Rendezvous Time IE of a wake-up frame.
+     * Gets the Thread MAC Command ID from a MAC Command 0x54 frame payload.
      *
-     * @returns Pointer to the Rendezvous Time IE.
+     * @param[out] aThreadCmdId  Set to the Thread Cmd ID byte on success.
+     *
+     * @retval kErrorNone   Successfully retrieved the Thread Cmd ID.
+     * @retval kErrorParse  Frame is not a MAC Cmd 0x54 frame or payload is too short.
      */
-    RendezvousTimeIe *GetRendezvousTimeIe(void) { return AsNonConst(AsConst(this)->GetRendezvousTimeIe()); }
+    Error GetThreadMacCommandId(uint8_t &aThreadCmdId) const;
 
     /**
-     * This method returns the Rendezvous Time IE of a wake-up frame.
+     * Indicates whether this frame is a Thread Direct Link Command (MAC Cmd 0x54 / Thread Cmd 0x02).
      *
-     * @returns Const pointer to the Rendezvous Time IE.
+     * @returns TRUE if the frame is a TD Link Command, FALSE otherwise.
      */
-    const RendezvousTimeIe *GetRendezvousTimeIe(void) const
-    {
-        const uint8_t *ie = GetHeaderIe(RendezvousTimeIe::kHeaderIeId);
+    bool IsThreadDirectLinkCommand(void) const;
 
-        return (ie != nullptr) ? reinterpret_cast<const RendezvousTimeIe *>(ie + sizeof(HeaderIe)) : nullptr;
-    }
-
-    /**
-     * This method returns the Connection IE of a wake-up frame.
-     *
-     * @returns Pointer to the Connection IE.
-     */
-    ConnectionIe *GetConnectionIe(void) { return AsNonConst(AsConst(this)->GetConnectionIe()); }
-
-    /**
-     * This method returns the Connection IE of a wake-up frame.
-     *
-     * @returns Const pointer to the Connection IE.
-     */
-    const ConnectionIe *GetConnectionIe(void) const
-    {
-        const uint8_t *ie = GetThreadIe(ConnectionIe::kThreadIeSubtype);
-
-        return (ie != nullptr) ? reinterpret_cast<const ConnectionIe *>(ie + sizeof(HeaderIe)) : nullptr;
-    }
-#endif // OPENTHREAD_CONFIG_WAKEUP_COORDINATOR_ENABLE || OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
+#endif // OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
 
     /**
      * Returns the IEEE 802.15.4 Frame Version.
@@ -1297,6 +1312,88 @@ public:
     void SetTimeSyncSeq(uint8_t aTimeSyncSeq) { mInfo.mTxInfo.mIeInfo->mTimeSyncSeq = aTimeSyncSeq; }
 #endif // OPENTHREAD_CONFIG_TIME_SYNC_ENABLE
 
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+    /**
+     * Generates a Thread Direct Wake Command frame (MAC Command 0x54 / Thread Cmd 0x01).
+     *
+     * @param[in] aPanId                 The Thread network PAN ID.
+     * @param[in] aDstExtAddress         Extended address of the target Wake Listener.
+     * @param[in] aSrcExtAddress         Extended address of this Wake Initiator.
+     * @param[in] aRendezvousTimeTenSym  Remaining wake sequence duration in 10-symbol units (0-255).
+     * @param[in] aRetryInterval         Connection retry interval (4-bit value).
+     * @param[in] aRetryCount            Connection retry count (4-bit value).
+     *
+     * @retval kErrorNone         Frame generated successfully.
+     * @retval kErrorInvalidArgs  Source address is not set.
+     */
+    Error GenerateThreadDirectWakeCommand(PanId             aPanId,
+                                          const ExtAddress &aDstExtAddress,
+                                          const ExtAddress &aSrcExtAddress,
+                                          WakeFrameType     aWakeType,
+                                          uint8_t           aRendezvousTimeTenSym,
+                                          uint8_t           aRetryInterval,
+                                          uint8_t           aRetryCount);
+#endif
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+    /**
+     * Generates a Thread Direct Link Command frame (MAC Command 0x54 / Thread Cmd 0x02).
+     *
+     * Sent by the Wake Listener to the Wake Initiator during the TD link handshake.
+     * The frame carries the WL's SCA LTV and a Challenge LTV inside a Thread Header IE.
+     * Optional payload fields (Supervision Interval, Services bitmap) are included when
+     * the corresponding pointer is non-null.
+     *
+     * @param[in] aPanId               The Thread network PAN ID.
+     * @param[in] aDstExtAddress       Extended address of the Wake Initiator (destination).
+     * @param[in] aSrcExtAddress       Extended address of the Wake Listener (source).
+     * @param[in] aScaParams           WL's SCA parameters to encode in the SCA LTV.
+     * @param[in] aChallenge           Challenge value to encode in the Challenge LTV.
+     * @param[in] aSupervisionInterval Pointer to the 1-byte Supervision Interval field, or nullptr to omit.
+     * @param[in] aServices            Pointer to the 1-byte Services bitmap field, or nullptr to omit.
+     *
+     * @retval kErrorNone   Frame generated successfully.
+     * @retval kErrorNoBufs Insufficient PSDU space to fit all IEs and payload.
+     */
+    Error GenerateThreadDirectLinkCommand(PanId               aPanId,
+                                          const ExtAddress   &aDstExtAddress,
+                                          const ExtAddress   &aSrcExtAddress,
+                                          const ScaParams    &aScaParams,
+                                          const ChallengeLtv *aChallenge,
+                                          const uint8_t      *aSupervisionInterval,
+                                          const uint8_t      *aServices);
+
+    /**
+     * Generates a Thread Direct teardown frame in this object.
+     *
+     * The teardown is a MAC Command 0x54 / Thread Command 0x02 frame carrying an empty
+     * SCA LTV (Length=0) in the Thread Header IE.  No Challenge LTV is present.
+     * Security uses the peer's wake key.
+     *
+     * @param[in] aPanId           Destination PAN ID.
+     * @param[in] aDstExtAddress   Peer extended address.
+     * @param[in] aSrcExtAddress   Own extended address.
+     *
+     * @retval kErrorNone    Frame built successfully.
+     * @retval kErrorNoBufs  Frame buffer too small.
+     */
+    Error GenerateThreadDirectTeardown(PanId             aPanId,
+                                       const ExtAddress &aDstExtAddress,
+                                       const ExtAddress &aSrcExtAddress);
+
+    /**
+     * Patches the SLW phase field of the SCA LTV in the Thread Header IE of this frame.
+     *
+     * Searches the frame's 802.15.4 Header IE list for the Thread Header IE (element 0x2d),
+     * locates the SCA LTV (type 0x02) within it, and overwrites the 2-byte SLW Phase field
+     * with @p aPhase.  A no-op if the frame contains no Thread Header IE or the SCA LTV
+     * does not carry SLW fields.
+     *
+     * @param[in] aPhase  SLW phase in slot-duration units to write into the SCA LTV.
+     */
+    void SetScaLtvPhase(uint16_t aPhase);
+#endif
+
     /**
      * Generate Imm-Ack in this frame object.
      *
@@ -1317,20 +1414,6 @@ public:
      * @retval  kErrorParse          @p aRxFrame has incorrect format.
      */
     Error GenerateEnhAck(const RxFrame &aRxFrame, bool aIsFramePending, const uint8_t *aIeData, uint8_t aIeLength);
-
-#if OPENTHREAD_CONFIG_WAKEUP_COORDINATOR_ENABLE
-    /**
-     * Generate IEE 802.15.4 Wake-up frame.
-     *
-     * @param[in]    aPanId          A destination PAN identifier
-     * @param[in]    aWakeupRequest  A const reference to the wake-up request.
-     * @param[in]    aSource         A source address (short or extended)
-     *
-     * @retval  kErrorNone        Successfully generated Wake-up frame.
-     * @retval  kErrorInvalidArgs @p aDest or @p aSource have incorrect type.
-     */
-    Error GenerateWakeupFrame(PanId aPanId, const WakeupRequest &aWakeupRequest, const Address &aSource);
-#endif
 
 #if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
     /**

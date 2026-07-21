@@ -112,7 +112,6 @@ tag:
   - hwfilter:!device:device_family_efr32mr21
   - toolchain:gcc
   - toolchain:llvm
-  - hwfilter:ram:128k
 
 readme:
   - path: ./README-OT-NCP.md

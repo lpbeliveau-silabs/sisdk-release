@@ -38,7 +38,6 @@
 #include <openthread/openthread-system.h>
 
 #include "host/async_task.hpp"
-#include "host/posix/firewall_ingress.hpp"
 #include "lib/spinel/spinel_driver.hpp"
 
 namespace otbr {
@@ -147,8 +146,6 @@ void NcpHost::Init(void)
 #if OTBR_ENABLE_DHCP6_PD && OTBR_ENABLE_BORDER_ROUTING
     mNcpSpinel.BorderRoutingSetDhcp6PdEnabled(true);
 #endif
-    // NAT64 prefix management on NCP is enabled after SPINEL_PROP_INFRA_IF_STATE is first set
-    // (see NcpSpinel::SetInfraIf) so the NCP sees infra before BORDER_ROUTER_NAT64_ENABLE.
     mIsInitialized = true;
 }
 
@@ -396,33 +393,10 @@ void NcpHost::SetMdnsPublisher(Mdns::Publisher *aPublisher)
 }
 #endif
 
-#if OTBR_ENABLE_MDNS && (OTBR_ENABLE_SRP_ADVERTISING_PROXY || OTBR_ENABLE_DNSSD_PLAT)
+#if OTBR_ENABLE_SRP_ADVERTISING_PROXY
 void NcpHost::HandleMdnsState(Mdns::Publisher::State aState)
 {
     mNcpSpinel.DnssdSetState(aState);
-}
-#endif
-
-#if OTBR_ENABLE_DNSSD_PLAT
-void NcpHost::NotifyDnssdPlatformStateToNcp(otPlatDnssdState aState)
-{
-#if OTBR_ENABLE_MDNS && (OTBR_ENABLE_SRP_ADVERTISING_PROXY || OTBR_ENABLE_DNSSD_PLAT)
-    Mdns::Publisher::State mdnsState =
-        (aState == OT_PLAT_DNSSD_READY) ? Mdns::Publisher::State::kReady : Mdns::Publisher::State::kIdle;
-    mNcpSpinel.DnssdSetState(mdnsState);
-#endif
-}
-#endif
-
-#if OTBR_ENABLE_TREL
-void NcpHost::SetTrelStateChangedCallback(NcpSpinel::TrelStateChangedCallback aCallback)
-{
-    mNcpSpinel.SetTrelStateChangedCallback(aCallback);
-}
-
-otError NcpHost::SetTrelHostUdpPort(bool aEnabled, uint16_t aHostPort)
-{
-    return mNcpSpinel.SetTrelHostUdpPort(aEnabled, aHostPort);
 }
 #endif
 
@@ -467,11 +441,6 @@ void NcpHost::InitInfraIfCallbacks(InfraIf &aInfraIf)
 otbrError NcpHost::Ip6Send(const uint8_t *aData, uint16_t aLength)
 {
     return mNcpSpinel.Ip6Send(aData, aLength);
-}
-
-void NcpHost::HandleThreadInterfaceIp6UnicastAddressesUpdated(const std::vector<Ip6AddressInfo> &aAddrInfos)
-{
-    RefreshIngressAllowDstFromThreadUnicastAddrs(aAddrInfos);
 }
 
 otbrError NcpHost::Ip6MulAddrUpdateSubscription(const otIp6Address &aAddress, bool aIsAdded)

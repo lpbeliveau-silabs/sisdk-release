@@ -50,6 +50,7 @@
 #include "common/random.hpp"
 #include "common/timer.hpp"
 #include "crypto/hmac_sha256.hpp"
+#include "mac/mac_header_ltv.hpp"
 #include "mac/mac_types.hpp"
 #include "thread/mle_types.hpp"
 
@@ -367,15 +368,6 @@ public:
      */
     const Mle::KeyMaterial &GetTemporaryMleKey(uint32_t aKeySequence);
 
-    /**
-     * Returns a temporary MAC key Material computed from the given key sequence.
-     *
-     * @param[in]  aKeySequence  The key sequence value.
-     *
-     * @returns The temporary MAC key.
-     */
-    const Mle::KeyMaterial &GetTemporaryMacKey(uint32_t aKeySequence);
-
 #if OPENTHREAD_CONFIG_RADIO_LINK_IEEE_802_15_4_ENABLE
     /**
      * Returns the current MAC Frame Counter value for 15.4 radio link.
@@ -448,6 +440,61 @@ public:
      * Increments the current MLE Frame Counter value.
      */
     void IncrementMleFrameCounter(void);
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    /**
+     * Returns the default Thread Direct Wake Key as `Mac::KeyMaterial`.
+     *
+     * The Wake Key is derived as HMAC-SHA256(NetworkKey, "Thread-Wake") and cached.
+     * The cache is invalidated whenever the Network Key changes.
+     *
+     * @returns A reference to the cached Wake Key material.
+     */
+    const Mac::KeyMaterial &GetDefaultWakeKey(void);
+
+    /**
+     * Stores or removes a pre-provisioned guest Wake Key.
+     *
+     * Guest keys use key indices in [OT_MAC_FRAME_GUEST_WAKE_KEY_INDEX_MIN,
+     * OT_MAC_FRAME_GUEST_WAKE_KEY_INDEX_MAX] (130-192). Passing @p aKey as nullptr
+     * removes any previously stored key at @p aKeyIndex.
+     *
+     * @param[in] aKeyIndex  Guest key index (130-192).
+     * @param[in] aKey       Key material to store, or nullptr to remove.
+     */
+    Error SetGuestWakeKey(uint8_t aKeyIndex, const Mac::KeyMaterial *aKey);
+
+    /**
+     * Looks up a pre-provisioned guest Wake Key by index.
+     *
+     * @param[in] aKeyIndex  Guest key index (130-192).
+     *
+     * @returns A pointer to the stored key material, or nullptr if not found.
+     */
+    const Mac::KeyMaterial *FindGuestWakeKey(uint8_t aKeyIndex) const;
+
+    /**
+     * Computes the Thread Direct Challenge LTV value.
+     *
+     * Challenge = HMAC-SHA256(WakeKey, LinkFC || WakeFC || WakeID || LinkSeq)[0:15]
+     *
+     * @param[in]  aKeyIndex           Wake key index (129 for default, 130-192 for guest).
+     * @param[in]  aLinkFrameCounter   Frame counter to be used in the TD Link Command.
+     * @param[in]  aWakeFrameCounter   Frame counter from the received Wake Frame.
+     * @param[in]  aWakeId             8-byte Wake ID, zero-padded if shorter.
+     * @param[in]  aLinkSeq            Link sequence number.
+     * @param[out] aChallenge          Receives the 16-byte challenge value.
+     *
+     * @retval kErrorNone       Challenge computed successfully.
+     * @retval kErrorNotFound   Wake key at @p aKeyIndex is not provisioned.
+     */
+    Error ComputeChallenge(uint8_t            aKeyIndex,
+                           uint32_t           aLinkFrameCounter,
+                           uint32_t           aWakeFrameCounter,
+                           const uint8_t     *aWakeId,
+                           uint8_t            aLinkSeq,
+                           Mac::ChallengeLtv &aChallenge);
+#endif
 
     /**
      * Returns the KEK as `KekKeyMaterial`
@@ -601,6 +648,11 @@ private:
 
     static const uint8_t kThreadString[];
 
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    static const uint8_t     kWakeKeyString[];
+    static constexpr uint8_t kWakeIdSize = 8; ///< Fixed length of WakeID in Challenge HMAC input (zero-padded).
+#endif
+
 #if OPENTHREAD_CONFIG_RADIO_LINK_TREL_ENABLE
     static const uint8_t kHkdfExtractSaltString[];
     static const uint8_t kTrelInfoString[];
@@ -616,8 +668,20 @@ private:
     Mle::KeyMaterial mMleKey;
     Mle::KeyMaterial mTemporaryMleKey;
 
-#if OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
-    Mle::KeyMaterial mTemporaryMacKey;
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    // Guest wake keys keyed by Aux Security Header index (130-192).
+    // mKeyIndex == 0 marks an empty slot.
+    struct GuestWakeKeyEntry
+    {
+        uint8_t          mKeyIndex;
+        Mac::KeyMaterial mKey;
+    };
+
+    static constexpr uint8_t kMaxGuestWakeKeys = OPENTHREAD_CONFIG_THREAD_DIRECT_MAX_DIRECT_PEERS;
+
+    Mac::KeyMaterial  mWakeKeyMaterial;
+    bool              mWakeKeyValid : 1;
+    GuestWakeKeyEntry mGuestWakeKeys[kMaxGuestWakeKeys];
 #endif
 
 #if OPENTHREAD_CONFIG_RADIO_LINK_TREL_ENABLE

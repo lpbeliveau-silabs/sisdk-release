@@ -110,13 +110,20 @@ configuration:
   - name: SL_CPC_TX_QUEUE_ITEM_MAX_COUNT
     value: 15
 
+define:
+  - name: OPENTHREAD_CONFIG_RADIO_LINK_TREL_ENABLE
+    value: 0
+  # TODO: Uncomment this if enabling TREL above for ot-ncp-ftd-cpc
+  # due to a PSA issue with HKDF operations
+  # - name: OPENTHREAD_CONFIG_PLATFORM_KEY_REFERENCES_ENABLE
+  #  value: 0
+
 tag:
   - prebuilt_demo
   - hwfilter:device:device_supports_thread
   - hwfilter:!device:device_family_efr32mr21
   - toolchain:gcc
   - toolchain:llvm
-  - hwfilter:ram:128k
 
 readme:
   - path: ./README-OT-NCP.md

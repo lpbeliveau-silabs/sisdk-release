@@ -96,18 +96,6 @@ extern void otPlatBorderRoutingProcessIcmp6Ra(otInstance *aInstance, const uint8
 extern void otPlatBorderRoutingProcessDhcp6PdPrefix(otInstance                            *aInstance,
                                                     const otBorderRoutingPrefixTableEntry *aPrefixInfo);
 
-/**
- * Notifies the platform that the favored NAT64 prefix changed.
- *
- * This platform function is optional.
- *
- * Requires `OPENTHREAD_CONFIG_NAT64_BORDER_ROUTING_ENABLE` and
- * `OPENTHREAD_CONFIG_NAT64_FAVORED_PREFIX_NOTIFICATION_ENABLE`.
- *
- * @param[in] aInstance A pointer to an OpenThread instance.
- */
-extern void otPlatBorderRoutingFavoredNat64PrefixChanged(otInstance *aInstance);
-
 #ifdef __cplusplus
 }
 #endif

@@ -33,8 +33,6 @@
 # shellcheck source=script/_initrc
 . "$(dirname "$0")"/_initrc
 
-NAT64_SERVICE="${NAT64_SERVICE:-openthread}"
-
 FIREWALL="${FIREWALL:-1}"
 
 # Handle deprecated DHCPV6_PD_REF flag
@@ -107,10 +105,6 @@ install_packages_apt()
     # nat64
     sudo apt-get install --no-install-recommends -y iptables
 
-    if with NAT64 && [[ ${NAT64_SERVICE} == "tayga" ]]; then
-        sudo apt-get install --no-install-recommends -y tayga
-    fi
-
     sudo apt-get install --no-install-recommends -y bind9
 
     # DHCPv6 PD client implementation using dhcpcd
@@ -166,9 +160,6 @@ install_packages_rpm()
     sudo $PM install -y dbus-devel
     sudo $PM install -y avahi avahi-devel
     sudo $PM install -y iptables
-    if with NAT64 && [[ ${NAT64_SERVICE} == "tayga" ]]; then
-        sudo $PM install -y tayga
-    fi
     sudo $PM install -y jsoncpp-devel
     sudo $PM install -y wget
     sudo $PM install -y protobuf protobuf-devel

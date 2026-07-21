@@ -228,9 +228,35 @@ ot_unit_test(hmac_sha256)
 ot_unit_test(ip4_header)
 ot_unit_test(ip6_header)
 ot_unit_test(ip_address)
+ot_unit_test(key_manager)
+
+add_executable(ot-test-key-manager-td
+    test_key_manager.cpp
+)
+
+target_include_directories(ot-test-key-manager-td
+    PRIVATE
+        ${COMMON_INCLUDES}
+)
+
+target_link_libraries(ot-test-key-manager-td
+    PRIVATE
+        ${COMMON_LIBS}
+)
+
+target_compile_options(ot-test-key-manager-td
+    PRIVATE
+        ${COMMON_COMPILE_OPTIONS}
+        "-DOPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE=1"
+        "-DOPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE=1"
+)
+
+add_test(NAME ot-test-key-manager-td COMMAND ot-test-key-manager-td)
+
 ot_unit_test(link_metrics_manager)
 ot_unit_test(link_quality)
 ot_unit_test(linked_list)
+ot_unit_test(ltv)
 ot_unit_test(lowpan)
 ot_unit_test(mac_frame)
 ot_unit_test(macros)
@@ -264,6 +290,30 @@ ot_unit_test(srp_server)
 ot_unit_test(string)
 ot_unit_test(tasklet)
 ot_unit_test(tcat)
+
+add_executable(ot-test-td-ltv
+    test_td_ltv.cpp
+)
+
+target_include_directories(ot-test-td-ltv
+    PRIVATE
+        ${COMMON_INCLUDES}
+)
+
+target_link_libraries(ot-test-td-ltv
+    PRIVATE
+        ${COMMON_LIBS}
+)
+
+target_compile_options(ot-test-td-ltv
+    PRIVATE
+        ${COMMON_COMPILE_OPTIONS}
+        "-DOPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE=1"
+        "-DOPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE=1"
+)
+
+add_test(NAME ot-test-td-ltv COMMAND ot-test-td-ltv)
+
 ot_unit_test(timer)
 ot_unit_test(tlv)
 ot_unit_test(toolchain test_toolchain_c.c)

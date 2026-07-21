@@ -63,7 +63,6 @@ public:
 #if OTBR_ENABLE_DHCP6_PD && OTBR_ENABLE_BORDER_ROUTING
         virtual otbrError BorderRoutingProcessDhcp6PdPrefix(const otBorderRoutingPrefixTableEntry *aPrefixInfo);
 #endif
-        virtual void HandleThreadInterfaceIp6UnicastAddressesUpdated(const std::vector<Ip6AddressInfo> &aAddrInfos);
     };
 
     Netif(const std::string &aInterfaceName, Dependencies &aDependencies);

@@ -39,6 +39,7 @@ include:
   - path: cli_srp_client.hpp
   - path: cli_srp_server.hpp
   - path: cli_tcat.hpp
+  - path: cli_td.hpp
   - path: cli_tcp.hpp
   - path: cli_udp.hpp
   - path: cli_utils.hpp
@@ -69,6 +70,7 @@ source:
 - path: util/third_party/openthread/src/cli/cli_srp_client.cpp
 - path: util/third_party/openthread/src/cli/cli_srp_server.cpp
 - path: util/third_party/openthread/src/cli/cli_tcat.cpp
+- path: util/third_party/openthread/src/cli/cli_td.cpp
 - path: util/third_party/openthread/src/cli/cli_tcp.cpp
 - path: util/third_party/openthread/src/cli/cli_udp.cpp
 - path: util/third_party/openthread/src/cli/cli_utils.cpp

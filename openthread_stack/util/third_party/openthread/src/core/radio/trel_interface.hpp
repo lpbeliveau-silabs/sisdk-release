@@ -41,9 +41,7 @@
 #include <openthread/trel.h>
 #include <openthread/platform/trel.h>
 
-#include "common/callback.hpp"
 #include "common/locator.hpp"
-#include "common/tasklet.hpp"
 #include "net/socket.hpp"
 #include "radio/trel_packet.hpp"
 
@@ -73,13 +71,6 @@ class Interface : public InstanceLocator
                                          const otSockAddr *aSenderAddr);
 
 public:
-    /**
-     * Defines the callback used by TREL interface to notify user of state changes.
-     *
-     * Please see `otTrelStateChangeCallback` for more details.
-     */
-    typedef otTrelStateChangeCallback StateChangeCallback;
-
     /**
      * Represents an entity requesting to enable or disable the TREL interface (via `SetEnabled()`).
      */
@@ -158,36 +149,6 @@ public:
      */
     uint16_t GetUdpPort(void) const { return mUdpPort; }
 
-    /**
-     * Sets the TREL UDP port.
-     *
-     * @param[in] aPort   The UDP port number.
-     */
-    void SetUdpPort(uint16_t aPort) { mUdpPort = aPort; }
-
-#if OPENTHREAD_CONFIG_TREL_DELEGATE_INFRA_TO_HOST_ENABLE
-    /**
-     * Gets the TREL interface's host UDP port.
-     *
-     * @returns The TREL interface's host UDP port.
-     */
-    uint16_t GetHostUdpPort(void) const { return mHostUdpPort; }
-
-    /**
-     * Sets the TREL interface's host UDP port.
-     *
-     * @param[in] aPort   The UDP port number.
-     */
-    void SetHostUdpPort(uint16_t aPort);
-#endif // OPENTHREAD_CONFIG_TREL_DELEGATE_INFRA_TO_HOST_ENABLE
-    /**
-     * Sets the callback.
-     *
-     * @param[in] aCallback   The callback function pointer.
-     * @param[in] aContext    The context associated and used with callback handler.
-     */
-    void SetStateChangeCallback(StateChangeCallback aCallback, void *aContext) { mCallback.Set(aCallback, aContext); }
-
 private:
     enum State : uint8_t
     {
@@ -199,30 +160,20 @@ private:
     explicit Interface(Instance &aInstance);
 
     void UpdateState(void);
-    void HandleTask(void);
 
     // Methods used by `Trel::Link`.
-    void Init(void);
-    /** Sets `mUdpPort` from `Ip6::Udp::GetEphemeralPort()` (see `Init()`). */
-    void  AssignDefaultUdpPortFromEphemeral(void);
+    void  Init(void);
     Error Send(Packet &aPacket, bool aIsDiscovery = false);
 
     // Callbacks from `otPlatTrel`.
     void HandleReceived(uint8_t *aBuffer, uint16_t aLength, const Ip6::SockAddr &aSenderAddr);
-
-    using CallbackTask = TaskletIn<Interface, &Interface::HandleTask>;
 
     bool     mUserEnabled : 1;
     bool     mStackEnabled : 1;
     bool     mFiltered : 1;
     State    mState;
     uint16_t mUdpPort;
-#if OPENTHREAD_CONFIG_TREL_DELEGATE_INFRA_TO_HOST_ENABLE
-    uint16_t mHostUdpPort;
-#endif
-    Packet                        mRxPacket;
-    CallbackTask                  mCallbackTask;
-    Callback<StateChangeCallback> mCallback;
+    Packet   mRxPacket;
 };
 
 } // namespace Trel

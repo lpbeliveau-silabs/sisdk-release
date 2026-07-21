@@ -26,7 +26,6 @@
 #
 
 static_library("cli_uart") {
-  configs += [ "../../../:openthread_private_flags" ]
   sources = [ "cli_uart.cpp" ]
   include_dirs = [ "../../platforms" ]
   deps = [

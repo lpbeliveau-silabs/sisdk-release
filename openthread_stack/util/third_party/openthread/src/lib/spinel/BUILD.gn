@@ -73,7 +73,6 @@ source_set("spinel-api") {
 }
 
 static_library("libopenthread-spinel-ncp") {
-  configs += [ "../../..:openthread_private_flags" ]
   sources = spinel_sources
   public_deps = [
     ":spinel-api",
@@ -87,7 +86,6 @@ static_library("libopenthread-spinel-ncp") {
 }
 
 static_library("libopenthread-radio-spinel") {
-  configs += [ "../../..:openthread_private_flags" ]
   sources = spinel_sources
   public_deps = [
     ":spinel-api",
@@ -107,7 +105,6 @@ static_library("libopenthread-radio-spinel") {
 }
 
 static_library("libopenthread-spinel-rcp") {
-  configs += [ "../../..:openthread_private_flags" ]
   sources = spinel_sources
   public_deps = [
     ":spinel-api",

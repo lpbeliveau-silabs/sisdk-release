@@ -50,7 +50,7 @@
 // <h>  The following features require at least Thread Stack Protocol Version 1.2
 // <q>  Backbone Router
 #ifndef OPENTHREAD_CONFIG_BACKBONE_ROUTER_ENABLE
-#define OPENTHREAD_CONFIG_BACKBONE_ROUTER_ENABLE    1
+#define OPENTHREAD_CONFIG_BACKBONE_ROUTER_ENABLE    0
 #endif
 // <q>  CSL Auto Synchronization using data polling
 #ifndef OPENTHREAD_CONFIG_MAC_CSL_AUTO_SYNC_ENABLE
@@ -62,7 +62,7 @@
 #endif
 // <q>  CSL (Coordinated Sampled Listening) Receiver
 #ifndef OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
-#define OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE   0
+#define OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE   1
 #endif
 // <o SL_OPENTHREAD_CSL_TX_UNCERTAINTY> CSL Scheduling Uncertainty (±10 us units) <12..999:1>
 // <i> Left unchanged the value will be set to 175 for RCPs, 20 for FTDs, and 12 for MTDs
@@ -114,11 +114,11 @@
 #endif
 // <q>  TCP API
 #ifndef OPENTHREAD_CONFIG_TCP_ENABLE
-#define OPENTHREAD_CONFIG_TCP_ENABLE                1
+#define OPENTHREAD_CONFIG_TCP_ENABLE                0
 #endif
 // <q>  DNS Client over TCP
 #ifndef OPENTHREAD_CONFIG_DNS_CLIENT_OVER_TCP_ENABLE
-#define OPENTHREAD_CONFIG_DNS_CLIENT_OVER_TCP_ENABLE 1
+#define OPENTHREAD_CONFIG_DNS_CLIENT_OVER_TCP_ENABLE 0
 #endif
 // <q>  DHCP6 Prefix Delegation feature
 #ifndef OPENTHREAD_CONFIG_BORDER_ROUTING_DHCP6_PD_ENABLE
@@ -136,27 +136,11 @@
 #ifndef OPENTHREAD_CONFIG_BORDER_ROUTING_ENABLE
 #define OPENTHREAD_CONFIG_BORDER_ROUTING_ENABLE        1
 #endif
-// <q>  NAT64 Border Routing prefix manager
-#ifndef OPENTHREAD_CONFIG_NAT64_BORDER_ROUTING_ENABLE
-#define OPENTHREAD_CONFIG_NAT64_BORDER_ROUTING_ENABLE  1
-#endif
-// <i>  NAT64 Translator
-// <i>  Disabled by default for NCP, translator runs on the host
-#ifndef OPENTHREAD_CONFIG_NAT64_TRANSLATOR_ENABLE
-#define OPENTHREAD_CONFIG_NAT64_TRANSLATOR_ENABLE      0
-#endif
-// <i>  NAT64 Favored Prefix Notification
-// <i>  This conguration enables the NAT64 favored prefix notification to host.
-#ifndef OPENTHREAD_CONFIG_NAT64_FAVORED_PREFIX_NOTIFICATION_ENABLE
-#define OPENTHREAD_CONFIG_NAT64_FAVORED_PREFIX_NOTIFICATION_ENABLE 1
-#endif
-// <i>  DNS-SD Platform
-// <i>  Required on NCP: gates the platform DNS-SD abstraction used by NCP DNS-SD, TREL, and SRP Advertising Proxy.
+// <q>  DNS-SD Platform
 #ifndef OPENTHREAD_CONFIG_PLATFORM_DNSSD_ENABLE
 #define OPENTHREAD_CONFIG_PLATFORM_DNSSD_ENABLE        1
 #endif
-// <i>  DNS-SD NCP
-// <i>  Required on NCP: Spinel-based implementation backing PLATFORM_DNSSD_ENABLE. Must match it.
+// <q>  DNS-SD NCP
 #ifndef OPENTHREAD_CONFIG_NCP_DNSSD_ENABLE
 #define OPENTHREAD_CONFIG_NCP_DNSSD_ENABLE             1
 #endif
@@ -164,8 +148,7 @@
 #ifndef OPENTHREAD_CONFIG_NCP_CLI_STREAM_ENABLE
 #define OPENTHREAD_CONFIG_NCP_CLI_STREAM_ENABLE        1
 #endif
-// <i>  NCP implementation of platform InfraIf APIs
-// <i>  Required on NCP FTD: provides ICMPv6 ND forwarding via Spinel needed by Border Routing.
+// <q>  NCP implementation of platform InfraIf APIs
 #ifndef OPENTHREAD_CONFIG_NCP_INFRA_IF_ENABLE 
 #define OPENTHREAD_CONFIG_NCP_INFRA_IF_ENABLE          1
 #endif
@@ -173,30 +156,9 @@
 #ifndef OPENTHREAD_CONFIG_SRP_SERVER_ADVERTISING_PROXY_ENABLE
 #define OPENTHREAD_CONFIG_SRP_SERVER_ADVERTISING_PROXY_ENABLE 1
 #endif
-// <q>  DNS-SD Discovery Proxy
-#ifndef OPENTHREAD_CONFIG_DNSSD_DISCOVERY_PROXY_ENABLE
-#define OPENTHREAD_CONFIG_DNSSD_DISCOVERY_PROXY_ENABLE 1
-#endif
 // <q>  Thread over Infrastructure
 #ifndef OPENTHREAD_CONFIG_RADIO_LINK_TREL_ENABLE
-#define OPENTHREAD_CONFIG_RADIO_LINK_TREL_ENABLE       1
-#endif
-// <q>  DNNSD query timeout
-#ifndef OPENTHREAD_CONFIG_DNSSD_QUERY_TIMEOUT
-#define OPENTHREAD_CONFIG_DNSSD_QUERY_TIMEOUT 3000
-#endif
-// <i>  TREL uses platform DNS-SD (NCP delegates discovery to host over Spinel)
-#ifndef OPENTHREAD_CONFIG_TREL_MANAGE_DNSSD_ENABLE
-#define OPENTHREAD_CONFIG_TREL_MANAGE_DNSSD_ENABLE     OPENTHREAD_CONFIG_RADIO_LINK_TREL_ENABLE
-#endif
-// <i>  TREL delegates infrastructure operations to the connected host
-#ifndef OPENTHREAD_CONFIG_TREL_DELEGATE_INFRA_TO_HOST_ENABLE
-#define OPENTHREAD_CONFIG_TREL_DELEGATE_INFRA_TO_HOST_ENABLE 1
-#endif
-
-// <i>  TREL DNS-SD discovery stabilization (debounce browse remove on NCP)
-#ifndef OPENTHREAD_CONFIG_TREL_DNSSD_DISCOVERY_STABILIZATION_ENABLE
-#define OPENTHREAD_CONFIG_TREL_DNSSD_DISCOVERY_STABILIZATION_ENABLE OPENTHREAD_CONFIG_TREL_MANAGE_DNSSD_ENABLE
+#define OPENTHREAD_CONFIG_RADIO_LINK_TREL_ENABLE       0
 #endif
 // </h>
 
@@ -210,14 +172,6 @@
 #define OPENTHREAD_CONFIG_BORDER_ROUTER_ENABLE      1
 #endif
 // </e>
-// <i>  Border Agent MeshCoP mDNS registration on NCP (disable for OTBR NCP mode).
-// <i>  When 0, the NCP stops registering only _meshcop._udp and _meshcop-e._udp via Spinel.
-// <i>  OTBR on the host publishes both on UDP-proxy ports instead (OTBR_BORDER_AGENT_MESHCOP_SERVICE).
-// <i>  Unaffected: border agent DTLS/ePSKc, Spinel MESHCOP_SERVICE_STATE/TXT, TREL (_trel._udp),
-// <i>  SRP advertising proxy, DNS-SD discovery proxy, and all other platform DNS-SD users.
-#ifndef OPENTHREAD_CONFIG_BORDER_AGENT_MESHCOP_SERVICE_ENABLE
-#define OPENTHREAD_CONFIG_BORDER_AGENT_MESHCOP_SERVICE_ENABLE 0
-#endif
 // <e>  Channel Manager
 #ifndef OPENTHREAD_CONFIG_CHANNEL_MANAGER_ENABLE
 #define OPENTHREAD_CONFIG_CHANNEL_MANAGER_ENABLE    0
@@ -493,7 +447,7 @@
 // </e>
 // <e>  UDP Forward
 #ifndef OPENTHREAD_CONFIG_UDP_FORWARD_ENABLE
-#define OPENTHREAD_CONFIG_UDP_FORWARD_ENABLE        1
+#define OPENTHREAD_CONFIG_UDP_FORWARD_ENABLE        0
 #endif
 // </e>
 // <e>  Enable Mac beacon payload parsing support

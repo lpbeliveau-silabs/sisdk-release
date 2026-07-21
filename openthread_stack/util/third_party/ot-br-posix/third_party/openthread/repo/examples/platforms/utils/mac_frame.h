@@ -342,14 +342,21 @@ void otMacFrameSetEnhAckProbingIe(otRadioFrame *aFrame, const uint8_t *aData, ui
  */
 typedef struct otRadioContext
 {
-    otExtAddress     mExtAddress; ///< In little-endian byte order.
-    uint32_t         mMacFrameCounter;
-    uint32_t         mPrevMacFrameCounter;
-    uint32_t         mCslSampleTime;   ///< The sample time based on the microsecond timer.
-    uint16_t         mCslPeriod;       ///< In unit of 10 symbols.
-    otShortAddress   mCslShortAddress; ///< The short address of the CSL receiver's peer.
-    otExtAddress     mCslExtAddress;   ///< The extended address of the CSL receiver's peer.
-    bool             mCslPresent : 1;  ///< Indicates whether the CSL header IE is present.
+    otExtAddress   mExtAddress; ///< In little-endian byte order.
+    uint32_t       mMacFrameCounter;
+    uint32_t       mPrevMacFrameCounter;
+    uint32_t       mCslSampleTime;   ///< The sample time based on the microsecond timer.
+    uint16_t       mCslPeriod;       ///< In unit of 10 symbols.
+    otShortAddress mCslShortAddress; ///< The short address of the CSL receiver's peer.
+    otExtAddress   mCslExtAddress;   ///< The extended address of the CSL receiver's peer.
+    bool           mCslPresent : 1;  ///< Indicates whether the CSL header IE is present.
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    uint32_t mSlwSampleTime; ///< Reference timestamp (us) for SLW phase computation.
+    uint16_t mSlwPeriod; ///< SLW period in units of advertised Slot Duration (0 = clear schedule / rx-on-when-idle).
+    uint32_t mSlwSlotDurationUs; ///< Advertised SLW Slot Duration, in microseconds (0 defaults to 625 us).
+    int16_t  mRamOffsetUs;       ///< RAM offset [-1024, 1023] us; shifts the SLW phase reference.
+    bool     mSlwPresent : 1;    ///< True if the SCA LTV should be written on each transmit.
+#endif
     otShortAddress   mShortAddress;
     otShortAddress   mAlternateShortAddress;
     otRadioKeyType   mKeyType;
@@ -400,6 +407,116 @@ otError otMacFrameProcessTransmitSecurity(otRadioFrame *aFrame, otRadioContext *
  *                  peer.
  */
 bool otMacFrameSrcAddrMatchCslReceiverPeer(const otRadioFrame *aFrame, const otRadioContext *aRadioContext);
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+/**
+ * Tell if @p aFrame is a Thread Direct Wake Command frame.
+ *
+ * A TD Wake Command is a MAC Command with no ACK request and wake key index 129 or 130-192
+ * in the Auxiliary Security Header (stamped by the stack before transmit).
+ *
+ * @param[in] aFrame  A pointer to the frame.
+ *
+ * @retval true   The frame is a TD Wake Command.
+ * @retval false  The frame is not a TD Wake Command.
+ */
+bool otMacFrameIsTdWakeCommand(otRadioFrame *aFrame);
+#endif
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+/**
+ * Tells if @p aFrame is a Thread Direct Link Command frame (MAC Cmd 0x54 / Thread Cmd 0x02).
+ *
+ * @param[in] aFrame  A pointer to the frame.
+ *
+ * @retval true   The frame is a TD Link Command.
+ * @retval false  The frame is not a TD Link Command.
+ */
+bool otMacFrameIsTdLinkCommand(const otRadioFrame *aFrame);
+#endif
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+/**
+ * Patches the SLW phase field of the SCA LTV in the Thread Header IE of @p aFrame.
+ *
+ * Locates the Thread Header IE (element 0x2d) in the 802.15.4 Header IE list, walks
+ * the LTV stream to find the SCA LTV (type 0x02), and overwrites its 2-byte SLW Phase
+ * field with @p aPhase.  A no-op if the frame contains no Thread Header IE or the SCA
+ * LTV does not carry SLW fields.
+ *
+ * @param[in] aFrame  A pointer to the frame to patch.
+ * @param[in] aPhase  SLW phase in slot-duration units.
+ */
+void otMacFrameSetScaLtvPhase(otRadioFrame *aFrame, uint16_t aPhase);
+#endif
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+/**
+ * Builds the Thread Header IE bytes for an Enh-ACK response to a TD Link Command.
+ *
+ * Extracts the Challenge LTV from @p aFrame and writes a Thread Header IE containing
+ * the echoed Challenge LTV to @p aDest.  The output is ready to copy into the Enh-ACK
+ * IE region at the ~192 us turnaround deadline.
+ *
+ * @param[in]  aFrame    Received TD Link Command frame.
+ * @param[out] aDest     Output buffer for the Thread Header IE bytes.
+ * @param[in]  aDestLen  Capacity of @p aDest in bytes.
+ *
+ * @returns  Number of bytes written to @p aDest, or 0 if @p aFrame carries no
+ *           Challenge LTV or @p aDest is too small.
+ */
+uint8_t otMacFrameGenerateThreadDirectEnhAckIe(const otRadioFrame *aFrame, uint8_t *aDest, uint8_t aDestLen);
+#endif
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+/**
+ * Writes an SCA LTV into the Thread Header IE of @p aFrame.
+ *
+ * The frame must already contain a pre-allocated Thread Header IE of sufficient
+ * size (at least 10 bytes: 2-byte IE header + 8-byte SCA LTV with SLW fields).
+ * Only the SCA LTV bytes are overwritten; other LTVs in the same IE are preserved
+ * if they precede the SCA LTV.  If no Thread Header IE is present, this is a no-op.
+ *
+ * Intended for use in time-critical transmit callbacks (e.g. SFD hook) where the
+ * SCA LTV phase must be stamped with the current radio time.
+ *
+ * The SLW start time is: frame TX time + @p aRamOffsetUs + SLW phase (in slots).
+ *
+ * @param[in] aFrame      Frame to update.
+ * @param[in] aSlwPeriod  SLW period in units of advertised Slot Duration
+ *                        (0 = clear schedule / rx-on-when-idle).
+ * @param[in] aSlwPhase   Time from (TX time + @p aRamOffsetUs) to the next SLW window, in slots.
+ * @param[in] aRamOffsetUs  RAM offset in [-1024, 1023] us.
+ */
+void otMacFrameSetThreadDirectScaLtv(otRadioFrame *aFrame,
+                                     uint16_t      aSlwPeriod,
+                                     uint16_t      aSlwPhase,
+                                     int16_t       aRamOffsetUs);
+#endif
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+/**
+ * Computes how many whole slots away the next SLW sample point is from a frame's MAC
+ * header TX time, plus the RAM offset covering the leftover microseconds.
+ *
+ * @param[in]  aNextSampleTimeUs  Next expected SLW sample time, in radio microseconds.
+ * @param[in]  aMacHeaderTxTime   MAC header TX time, in radio microseconds.
+ * @param[in]  aPeriodSlots       SLW period in units of @p aSlotDurationUs.
+ * @param[in]  aSlotDurationUs    SLW slot duration, in microseconds.
+ * @param[out] aPhaseSlots        Computed SLW phase, in slots.
+ * @param[out] aRamOffsetUs       Computed RAM offset, in microseconds.
+ *
+ * @retval true   The phase and RAM offset were computed successfully.
+ * @retval false  Inputs were invalid (zero period/slot duration) or the computed
+ *                phase/RAM offset fell outside representable bounds.
+ */
+bool otMacFrameCalculateSlwPhaseAndRamOffset(uint32_t  aNextSampleTimeUs,
+                                             uint32_t  aMacHeaderTxTime,
+                                             uint16_t  aPeriodSlots,
+                                             uint32_t  aSlotDurationUs,
+                                             uint16_t *aPhaseSlots,
+                                             int16_t  *aRamOffsetUs);
+#endif
 
 #ifdef __cplusplus
 } // extern "C"

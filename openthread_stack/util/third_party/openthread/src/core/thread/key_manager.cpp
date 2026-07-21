@@ -33,6 +33,8 @@
 
 #include "key_manager.hpp"
 
+#include <openthread/platform/radio.h>
+
 #include "crypto/hkdf_sha256.hpp"
 #include "crypto/storage.hpp"
 #include "instance/instance.hpp"
@@ -44,6 +46,12 @@ RegisterLogModule("KeyManager");
 const uint8_t KeyManager::kThreadString[] = {
     'T', 'h', 'r', 'e', 'a', 'd',
 };
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+const uint8_t KeyManager::kWakeKeyString[] = {
+    'T', 'h', 'r', 'e', 'a', 'd', '-', 'W', 'a', 'k', 'e',
+};
+#endif
 
 #if OPENTHREAD_CONFIG_RADIO_LINK_TREL_ENABLE
 const uint8_t KeyManager::kHkdfExtractSaltString[] = {'T', 'h', 'r', 'e', 'a', 'd', 'S', 'e', 'q', 'u', 'e', 'n',
@@ -166,6 +174,10 @@ exit:
 KeyManager::KeyManager(Instance &aInstance)
     : InstanceLocator(aInstance)
     , mKeySequence(0)
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    , mWakeKeyValid(false)
+    , mGuestWakeKeys()
+#endif
     , mMleFrameCounter(0)
     , mStoredMacFrameCounter(0)
     , mStoredMleFrameCounter(0)
@@ -308,6 +320,169 @@ void KeyManager::ComputeKeys(uint32_t aKeySequence, HashKeys &aHashKeys) const
     hmac.Finish(aHashKeys.mHash);
 }
 
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+const Mac::KeyMaterial &KeyManager::GetDefaultWakeKey(void)
+{
+    if (!mWakeKeyValid)
+    {
+        Crypto::HmacSha256       hmac;
+        Crypto::HmacSha256::Hash hash;
+        Crypto::Key              cryptoKey;
+        Mac::Key                 wakeKey;
+
+#if OPENTHREAD_CONFIG_PLATFORM_KEY_REFERENCES_ENABLE
+        cryptoKey.SetAsKeyRef(mNetworkKeyRef);
+#else
+        cryptoKey.Set(mNetworkKey.m8, NetworkKey::kSize);
+#endif
+
+        hmac.Start(cryptoKey);
+        hmac.Update(kWakeKeyString);
+        hmac.Finish(hash);
+
+        // Use the first 16 bytes of the HMAC-SHA256 output as the Wake Key
+        static_assert(Mac::Key::kSize <= Crypto::HmacSha256::Hash::kSize, "Wake Key size exceeds HMAC output size");
+        memcpy(wakeKey.m8, hash.m8, Mac::Key::kSize);
+
+        mWakeKeyMaterial.SetFrom(wakeKey, kExportableMacKeys);
+        mWakeKeyValid = true;
+    }
+
+    return mWakeKeyMaterial;
+}
+
+Error KeyManager::SetGuestWakeKey(uint8_t aKeyIndex, const Mac::KeyMaterial *aKey)
+{
+    Error error = kErrorNone;
+
+    for (GuestWakeKeyEntry &entry : mGuestWakeKeys)
+    {
+        if (entry.mKeyIndex == aKeyIndex)
+        {
+            if (aKey != nullptr)
+            {
+                entry.mKey = *aKey;
+            }
+            else
+            {
+                entry.mKeyIndex = 0;
+                entry.mKey.Clear();
+            }
+
+            ExitNow();
+        }
+    }
+
+    if (aKey != nullptr)
+    {
+        for (GuestWakeKeyEntry &entry : mGuestWakeKeys)
+        {
+            if (entry.mKeyIndex == 0)
+            {
+                entry.mKeyIndex = aKeyIndex;
+                entry.mKey      = *aKey;
+                ExitNow();
+            }
+        }
+
+        error = kErrorNoBufs;
+    }
+
+exit:
+    return error;
+}
+
+const Mac::KeyMaterial *KeyManager::FindGuestWakeKey(uint8_t aKeyIndex) const
+{
+    for (const GuestWakeKeyEntry &entry : mGuestWakeKeys)
+    {
+        if (entry.mKeyIndex == aKeyIndex)
+        {
+            return &entry.mKey;
+        }
+    }
+
+    return nullptr;
+}
+
+Error KeyManager::ComputeChallenge(uint8_t            aKeyIndex,
+                                   uint32_t           aLinkFrameCounter,
+                                   uint32_t           aWakeFrameCounter,
+                                   const uint8_t     *aWakeId,
+                                   uint8_t            aLinkSeq,
+                                   Mac::ChallengeLtv &aChallenge)
+{
+    Error                    error = kErrorNone;
+    Crypto::HmacSha256       hmac;
+    Crypto::HmacSha256::Hash hash;
+    Crypto::Key              challengeKey;
+    uint8_t                  rawKey[Mac::Key::kSize];
+    uint8_t                  word[sizeof(uint32_t)];
+    uint8_t                  wakeId[kWakeIdSize];
+
+    if (aKeyIndex == Mac::Frame::kWakeKeyIndex)
+    {
+        // Derive the raw wake key bytes inline (same derivation as GetDefaultWakeKey).
+        Crypto::HmacSha256       wakeHmac;
+        Crypto::HmacSha256::Hash wakeHash;
+        Crypto::Key              netKey;
+
+#if OPENTHREAD_CONFIG_PLATFORM_KEY_REFERENCES_ENABLE
+        netKey.SetAsKeyRef(mNetworkKeyRef);
+#else
+        netKey.Set(mNetworkKey.m8, NetworkKey::kSize);
+#endif
+
+        wakeHmac.Start(netKey);
+        wakeHmac.Update(kWakeKeyString);
+        wakeHmac.Finish(wakeHash);
+
+        static_assert(Mac::Key::kSize <= Crypto::HmacSha256::Hash::kSize, "Wake Key size exceeds HMAC output size");
+        memcpy(rawKey, wakeHash.m8, Mac::Key::kSize);
+    }
+    else
+    {
+        const Mac::KeyMaterial *material = FindGuestWakeKey(aKeyIndex);
+        VerifyOrExit(material != nullptr, error = kErrorNotFound);
+#if OPENTHREAD_CONFIG_PLATFORM_KEY_REFERENCES_ENABLE
+        // On PSA builds, export the guest key bytes for use as the challenge HMAC key.
+        size_t keyLen;
+        SuccessOrExit(error = Crypto::Storage::ExportKey(material->GetKeyRef(), rawKey, sizeof(rawKey), keyLen));
+#else
+        memcpy(rawKey, material->GetKey().GetBytes(), Mac::Key::kSize);
+#endif
+    }
+
+    challengeKey.Set(rawKey, Mac::Key::kSize);
+    hmac.Start(challengeKey);
+
+    BigEndian::WriteUint32(aLinkFrameCounter, word);
+    hmac.Update(word, sizeof(word));
+
+    BigEndian::WriteUint32(aWakeFrameCounter, word);
+    hmac.Update(word, sizeof(word));
+
+    // WakeID is always 8 bytes, zero-padded.
+    memset(wakeId, 0, sizeof(wakeId));
+    if (aWakeId != nullptr)
+    {
+        memcpy(wakeId, aWakeId, kWakeIdSize);
+    }
+    hmac.Update(wakeId, sizeof(wakeId));
+
+    hmac.Update(aLinkSeq);
+
+    hmac.Finish(hash);
+
+    static_assert(Mac::ChallengeLtv::kLength <= Crypto::HmacSha256::Hash::kSize,
+                  "Challenge length exceeds HMAC output size");
+    memcpy(aChallenge.mChallenge, hash.m8, Mac::ChallengeLtv::kLength);
+
+exit:
+    return error;
+}
+#endif // OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+
 #if OPENTHREAD_CONFIG_RADIO_LINK_TREL_ENABLE
 void KeyManager::ComputeTrelKey(uint32_t aKeySequence, Mac::Key &aKey) const
 {
@@ -332,6 +507,13 @@ void KeyManager::ComputeTrelKey(uint32_t aKeySequence, Mac::Key &aKey) const
 void KeyManager::UpdateKeyMaterial(void)
 {
     HashKeys hashKeys;
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    mWakeKeyValid = false; // Invalidate cached Wake Key whenever the Network Key changes
+    // Re-derive and push the wake key to the platform radio driver so that platforms with
+    // OT_RADIO_CAPS_TRANSMIT_SEC can encrypt TD Wake Frames (key index 129) in hardware.
+    IgnoreError(Get<Mac::SubMac>().SetWakeKey(Mac::Frame::kWakeKeyIndex, &GetDefaultWakeKey()));
+#endif
 
     ComputeKeys(mKeySequence, hashKeys);
 
@@ -427,18 +609,6 @@ const Mle::KeyMaterial &KeyManager::GetTemporaryMleKey(uint32_t aKeySequence)
 
     return mTemporaryMleKey;
 }
-
-#if OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
-const Mle::KeyMaterial &KeyManager::GetTemporaryMacKey(uint32_t aKeySequence)
-{
-    HashKeys hashKeys;
-
-    ComputeKeys(aKeySequence, hashKeys);
-    mTemporaryMacKey.SetFrom(hashKeys.GetMacKey());
-
-    return mTemporaryMacKey;
-}
-#endif
 
 #if OPENTHREAD_CONFIG_RADIO_LINK_TREL_ENABLE
 const Mac::KeyMaterial &KeyManager::GetTemporaryTrelMacKey(uint32_t aKeySequence)

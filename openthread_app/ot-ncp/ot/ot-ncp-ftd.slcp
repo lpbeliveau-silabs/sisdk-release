@@ -44,19 +44,6 @@ source:
 configuration:
   - name: SL_BOARD_ENABLE_VCOM
     value: 1
-    # By default, OTBR is configured to work with 460800 baud rate on UART
-  - name: SL_IOSTREAM_USART_VCOM_BAUDRATE
-    value: 460800
-    condition: [iostream_usart]
-  - name: SL_IOSTREAM_EUSART_VCOM_BAUDRATE
-    value: 460800
-    condition: [iostream_eusart]
-  - name: SL_IOSTREAM_USART_VCOM_FLOW_CONTROL_TYPE
-    value: usartHwFlowControlCtsAndRts
-    condition: [iostream_usart]
-  - name: SL_IOSTREAM_EUSART_VCOM_FLOW_CONTROL_TYPE
-    value: SL_IOSTREAM_EUSART_UART_FLOW_CTRL_CTS_RTS
-    condition: [iostream_eusart]
   - name: SL_MBEDTLS_KEY_EXCHANGE_ECDHE_ECDSA_ENABLED
     value: 1
   - name: SL_MBEDTLS_KEY_EXCHANGE_PSK_ENABLED
@@ -97,20 +84,18 @@ configuration:
     condition: [ot_rtt_log]
   - name: CIRCULAR_QUEUE_LEN_MAX
     value: 16
+  - name: SL_IOSTREAM_USART_VCOM_FLOW_CONTROL_TYPE
+    value: usartHwFlowControlCtsAndRts
+    condition: [iostream_usart]
+  - name: SL_IOSTREAM_EUSART_VCOM_FLOW_CONTROL_TYPE
+    value: SL_IOSTREAM_EUSART_UART_FLOW_CTRL_CTS_RTS
+    condition: [iostream_eusart]
   - name: SL_OPENTHREAD_STACK_TASK_MEM_SIZE
     value: 7168
     condition: [toolchain_lto]
   - name: configTOTAL_HEAP_SIZE
     value: 16384
     condition: [toolchain_lto, freertos]
-
-define:
-  - name: OPENTHREAD_CONFIG_MAC_FILTER_ENABLE
-    value: 1
-  - name: OPENTHREAD_CONFIG_MULTICAST_DNS_ENABLE
-    value: 0
-  - name: OPENTHREAD_CONFIG_PLATFORM_DNSSD_ALLOW_RUN_TIME_SELECTION
-    value: 0
 
 tag:
   - prebuilt_demo

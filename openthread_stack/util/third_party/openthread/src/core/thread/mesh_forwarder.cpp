@@ -93,7 +93,14 @@ void MeshForwarder::Start(void)
 {
     if (!mEnabled)
     {
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+        // For Thread Direct WL and WI, do not turn on the receiver by default if the device is
+        // configured as rx-off-when-idle. This keeps sleepy TD devices sleeping on start-up
+        // when they are not in the network and sampling for / transmitting wake frames.
+        Get<Mac::Mac>().SetRxOnWhenIdle(Get<Mle::Mle>().IsRxOnWhenIdle());
+#else
         Get<Mac::Mac>().SetRxOnWhenIdle(true);
+#endif
 #if OPENTHREAD_FTD
         mIndirectSender.Start();
 #endif
@@ -451,22 +458,50 @@ void MeshForwarder::ScheduleTransmissionTask(void)
 {
     VerifyOrExit(!mSendBusy && !mTxPaused);
 
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    VerifyOrExit(!Get<ThreadDirectTxScheduler>().IsPending());
+#endif
+
 #if OPENTHREAD_FTD && OPENTHREAD_CONFIG_MAC_COLLISION_AVOIDANCE_DELAY_ENABLE
     VerifyOrExit(!mDelayNextTx);
 #endif
 
+    SuccessOrExit(SelectNextDirectTransmission());
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    if (Get<ThreadDirectTxScheduler>().TrySchedule(*mSendMessage, mMacAddrs.mDestination) == kErrorNone)
+    {
+        ExitNow();
+    }
+#endif
+
+    Get<Mac::Mac>().RequestDirectFrameTransmission();
+
+exit:
+    return;
+}
+
+Error MeshForwarder::SelectNextDirectTransmission(void)
+{
+    Error error = kErrorNone;
+
     mSendMessage = PrepareNextDirectTransmission();
-    VerifyOrExit(mSendMessage != nullptr);
+    VerifyOrExit(mSendMessage != nullptr, error = kErrorNotFound);
 
     if (mSendMessage->GetOffset() == 0)
     {
         mSendMessage->SetTxSuccess(true);
     }
 
-    Get<Mac::Mac>().RequestDirectFrameTransmission();
-
 exit:
-    return;
+    return error;
+}
+
+const Message &MeshForwarder::GetSelectedDirectTransmission(void) const
+{
+    OT_ASSERT(mSendMessage != nullptr);
+
+    return *mSendMessage;
 }
 
 Message *MeshForwarder::PrepareNextDirectTransmission(void)
@@ -635,19 +670,42 @@ void MeshForwarder::SetRxOnWhenIdle(bool aRxOnWhenIdle)
 {
     Get<Mac::Mac>().SetRxOnWhenIdle(aRxOnWhenIdle);
 
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+    // Both WL and WI are sleepy MTDs operating without a Thread parent.  Data
+    // polling is not applicable while a Thread Direct link is active; the
+    // wake-listen schedule (WL) or wake burst (WI) drives the session instead.
+    if (!Get<Mac::Mac>().IsThreadDirectLinkActive())
+#endif
+    {
+        if (aRxOnWhenIdle)
+        {
+            mDataPollSender.StopPolling();
+        }
+        else
+        {
+            mDataPollSender.StartPolling();
+        }
+    }
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+    else
+    {
+        // TD link active - stop polling so it does not disrupt wake-listen or
+        // wake-burst receive windows.
+        mDataPollSender.StopPolling();
+    }
+#endif
+
     if (aRxOnWhenIdle)
     {
-        mDataPollSender.StopPolling();
         Get<SupervisionListener>().Stop();
     }
     else
     {
-        mDataPollSender.StartPolling();
         Get<SupervisionListener>().Start();
     }
 }
 
-Mac::TxFrame *MeshForwarder::HandleFrameRequest(Mac::TxFrames &aTxFrames)
+Mac::TxFrame *MeshForwarder::PrepareSelectedDirectFrame(Mac::TxFrames &aTxFrames)
 {
     Mac::TxFrame *frame         = nullptr;
     bool          addFragHeader = false;
@@ -734,6 +792,29 @@ Mac::TxFrame *MeshForwarder::HandleFrameRequest(Mac::TxFrames &aTxFrames)
 
 exit:
     return frame;
+}
+
+Mac::TxFrame *MeshForwarder::HandleFrameRequest(Mac::TxFrames &aTxFrames)
+{
+    Mac::TxFrame *frame = PrepareSelectedDirectFrame(aTxFrames);
+
+    if (frame != nullptr)
+    {
+        ApplyThreadDirectTxScheduling(*frame);
+    }
+
+    return frame;
+}
+
+void MeshForwarder::ApplyThreadDirectTxScheduling(Mac::TxFrame &aFrame)
+{
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    // Thread Direct reuses the existing direct-message/frame preparation flow,
+    // but applies peer-window timing only when the destination matches a TD peer.
+    Get<Mac::Mac>().ApplyThreadDirectTxScheduling(aFrame, mMacAddrs.mDestination);
+#else
+    OT_UNUSED_VARIABLE(aFrame);
+#endif
 }
 
 Neighbor *MeshForwarder::UpdateNeighborOnSentFrame(Mac::TxFrame       &aFrame,

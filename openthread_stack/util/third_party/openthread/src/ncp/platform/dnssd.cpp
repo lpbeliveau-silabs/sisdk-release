@@ -136,37 +136,37 @@ void otPlatDnssdStopSrvResolver(otInstance *aInstance, const otPlatDnssdSrvResol
 void otPlatDnssdStartTxtResolver(otInstance *aInstance, const otPlatDnssdTxtResolver *aResolver)
 {
     OT_UNUSED_VARIABLE(aInstance);
-    ot::Ncp::NcpBase::GetNcpInstance()->DnssdStartTxtResolver(aResolver);
+    OT_UNUSED_VARIABLE(aResolver);
 }
 
 void otPlatDnssdStopTxtResolver(otInstance *aInstance, const otPlatDnssdTxtResolver *aResolver)
 {
     OT_UNUSED_VARIABLE(aInstance);
-    ot::Ncp::NcpBase::GetNcpInstance()->DnssdStopTxtResolver(aResolver);
+    OT_UNUSED_VARIABLE(aResolver);
 }
 
 void otPlatDnssdStartIp6AddressResolver(otInstance *aInstance, const otPlatDnssdAddressResolver *aResolver)
 {
     OT_UNUSED_VARIABLE(aInstance);
-    ot::Ncp::NcpBase::GetNcpInstance()->DnssdStartIp6AddressResolver(aResolver);
+    OT_UNUSED_VARIABLE(aResolver);
 }
 
 void otPlatDnssdStopIp6AddressResolver(otInstance *aInstance, const otPlatDnssdAddressResolver *aResolver)
 {
     OT_UNUSED_VARIABLE(aInstance);
-    ot::Ncp::NcpBase::GetNcpInstance()->DnssdStopIp6AddressResolver(aResolver);
+    OT_UNUSED_VARIABLE(aResolver);
 }
 
 void otPlatDnssdStartIp4AddressResolver(otInstance *aInstance, const otPlatDnssdAddressResolver *aResolver)
 {
     OT_UNUSED_VARIABLE(aInstance);
-    ot::Ncp::NcpBase::GetNcpInstance()->DnssdStartIp4AddressResolver(aResolver);
+    OT_UNUSED_VARIABLE(aResolver);
 }
 
 void otPlatDnssdStopIp4AddressResolver(otInstance *aInstance, const otPlatDnssdAddressResolver *aResolver)
 {
     OT_UNUSED_VARIABLE(aInstance);
-    ot::Ncp::NcpBase::GetNcpInstance()->DnssdStopIp4AddressResolver(aResolver);
+    OT_UNUSED_VARIABLE(aResolver);
 }
 
 void otPlatDnssdStartRecordQuerier(otInstance *aInstance, const otPlatDnssdRecordQuerier *aQuerier)

@@ -550,8 +550,6 @@ void DnssdPlatform::ProcessIpAddrResolvers(const std::string                    
     std::vector<otPlatDnssdAddressAndTtl> addressAndTtls;
     auto                                  it = mIpAddrResolversMap.find(aHostName);
 
-    mResolvedHostInfoCache[DnsName(aHostName)] = aInfo;
-
     VerifyOrExit(mState == kStateReady);
 
     VerifyOrExit(it != mIpAddrResolversMap.end());
@@ -575,28 +573,11 @@ exit:
     return;
 }
 
-void DnssdPlatform::ReplayResolvedHostAddressesIfAny(const DnsName &aDnsName)
-{
-    auto cacheIt = mResolvedHostInfoCache.find(aDnsName);
-
-    VerifyOrExit(mState == kStateReady);
-    VerifyOrExit(cacheIt != mResolvedHostInfoCache.end());
-    VerifyOrExit(!cacheIt->second.mAddresses.empty());
-    VerifyOrExit(mHostSubscriptions.find(aDnsName) != mHostSubscriptions.end());
-
-    ProcessIpAddrResolvers(aDnsName.GetName(), cacheIt->second);
-
-exit:
-    return;
-}
-
 void DnssdPlatform::StartAddressResolver(const AddressResolver &aAddressResolver, AddressCallbackPtr aCallbackPtr)
 {
-    DnsName dnsName(aAddressResolver.mHostName);
+    auto &entryList = mIpAddrResolversMap[DnsName(aAddressResolver.mHostName)];
 
-    mIpAddrResolversMap[dnsName].AddIfAbsent(aAddressResolver.mInfraIfIndex, std::move(aCallbackPtr));
-
-    ReplayResolvedHostAddressesIfAny(dnsName);
+    entryList.AddIfAbsent(aAddressResolver.mInfraIfIndex, std::move(aCallbackPtr));
 
     PostHostSubscriptionUpdateTask();
 }
@@ -709,7 +690,6 @@ void DnssdPlatform::ExecuteHostSubscriptionUpdate(void)
         if (mIpAddrResolversMap.find(dnsName) == mIpAddrResolversMap.end())
         {
             mPublisher.UnsubscribeHost(dnsName.GetName());
-            mResolvedHostInfoCache.erase(dnsName);
             iter = mHostSubscriptions.erase(iter);
         }
         else

@@ -125,6 +125,7 @@ source:
 - path: "util/third_party/openthread/src/core/crypto/storage.cpp"
 - path: "util/third_party/openthread/src/core/mac/mac_frame.cpp"
 - path: "util/third_party/openthread/src/core/mac/mac_header_ie.cpp"
+- path: "util/third_party/openthread/src/core/mac/mac_header_ltv.cpp"
 - path: "util/third_party/openthread/src/core/mac/mac_types.cpp"
 - path: "util/third_party/openthread/src/lib/platform/exit_code.c"
 

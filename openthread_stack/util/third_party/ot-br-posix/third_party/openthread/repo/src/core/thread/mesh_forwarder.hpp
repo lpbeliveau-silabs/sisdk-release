@@ -63,6 +63,8 @@ namespace Mle {
 class DiscoverScanner;
 }
 
+class ThreadDirectTxScheduler;
+
 /**
  * @addtogroup core-mesh-forwarding
  *
@@ -83,6 +85,7 @@ class MeshForwarder : public InstanceLocator, private NonCopyable
     friend class IndirectSender;
     friend class Ip6::Ip6;
     friend class Mle::DiscoverScanner;
+    friend class ThreadDirectTxScheduler;
     friend class TimeTicker;
     friend class ot::MessagePool;
 
@@ -454,13 +457,19 @@ private:
     Error HandleDatagram(Message &aMessage, const Mac::Address &aMacSource);
     void  ClearReassemblyList(void);
     void  HandleDiscoverComplete(void);
+    Error SelectNextDirectTransmission(void);
 
-    void          HandleReceivedFrame(Mac::RxFrame &aFrame);
-    Mac::TxFrame *HandleFrameRequest(Mac::TxFrames &aTxFrames);
-    Neighbor     *UpdateNeighborOnSentFrame(Mac::TxFrame       &aFrame,
-                                            Error               aError,
-                                            const Mac::Address &aMacDest,
-                                            bool                aIsDataPoll);
+    void                HandleReceivedFrame(Mac::RxFrame &aFrame);
+    Mac::TxFrame       *HandleFrameRequest(Mac::TxFrames &aTxFrames);
+    Mac::TxFrame       *PrepareSelectedDirectFrame(Mac::TxFrames &aTxFrames);
+    void                ApplyThreadDirectTxScheduling(Mac::TxFrame &aFrame);
+    bool                HasSelectedDirectTransmission(void) const { return mSendMessage != nullptr; }
+    const Message      &GetSelectedDirectTransmission(void) const;
+    const Mac::Address &GetSelectedDirectDestination(void) const { return mMacAddrs.mDestination; }
+    Neighbor           *UpdateNeighborOnSentFrame(Mac::TxFrame       &aFrame,
+                                                  Error               aError,
+                                                  const Mac::Address &aMacDest,
+                                                  bool                aIsDataPoll);
     void UpdateNeighborLinkFailures(Neighbor &aNeighbor, Error aError, bool aAllowNeighborRemove, uint8_t aFailLimit);
     void HandleSentFrame(Mac::TxFrame &aFrame, Error aError);
     void UpdateSendMessage(Error aFrameTxError, Mac::Address &aMacDest, Neighbor *aNeighbor);

@@ -116,11 +116,10 @@ bool sli_ot_radio_interface_is_busy(void);
 /**
  * Set radio to idle state
  *
- * @param[in] aRailHandle  The RAIL handle
  * @param[in] aIdleMode    The idle mode to set
  * @param[in] aWait        Whether to wait for idle state
  */
-void sli_ot_radio_interface_set_idle(sl_rail_handle_t aRailHandle, sl_rail_idle_mode_t aIdleMode, bool aWait);
+void sli_ot_radio_interface_set_idle(sl_rail_idle_mode_t aIdleMode, bool aWait);
 
 /**
  * Configure RAIL RX options

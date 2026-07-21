@@ -306,6 +306,29 @@
 #endif
 
 /**
+ * @def OPENTHREAD_CONFIG_THREAD_DIRECT_SCHEDULED_TX_REQUEST_AHEAD_US
+ *
+ * Minimum microseconds of lead time required between when the MAC selects an SLW window
+ * for a scheduled TX and when the radio fires that TX.  This must cover:
+ * MAC frame processing, security, PAL setup, and RAIL CCA configuration.
+ */
+#ifndef OPENTHREAD_CONFIG_THREAD_DIRECT_SCHEDULED_TX_REQUEST_AHEAD_US
+#define OPENTHREAD_CONFIG_THREAD_DIRECT_SCHEDULED_TX_REQUEST_AHEAD_US 1500
+#endif
+
+/**
+ * @def OPENTHREAD_CONFIG_THREAD_DIRECT_LISTEN_RECEIVE_TIME_AFTER
+ *
+ * Margin applied after the end of a WL listen window before scheduling the next listen
+ * interval, in microseconds.
+ */
+#ifndef OPENTHREAD_CONFIG_THREAD_DIRECT_LISTEN_RECEIVE_TIME_AFTER
+#define OPENTHREAD_CONFIG_THREAD_DIRECT_LISTEN_RECEIVE_TIME_AFTER                                  \
+    (OPENTHREAD_CONFIG_THREAD_DIRECT_LISTEN_INTERVAL_US - OPENTHREAD_CONFIG_CSL_RECEIVE_TIME_AHEAD \
+     - OPENTHREAD_CONFIG_THREAD_DIRECT_LISTEN_DURATION_US)
+#endif
+
+/**
  * @def OPENTHREAD_CONFIG_CSL_RECEIVE_TIME_AHEAD
  *
  * Reception scheduling and ramp up time needed for the CSL receiver to be ready, in units of microseconds.
@@ -588,8 +611,7 @@
  *
  */
 #ifndef OPENTHREAD_CONFIG_CRYPTO_PLATFORM_ALLOCS_CONTEXT
-#define OPENTHREAD_CONFIG_CRYPTO_PLATFORM_ALLOCS_CONTEXT \
-    (OPENTHREAD_CONFIG_CRYPTO_LIB == OPENTHREAD_CONFIG_CRYPTO_LIB_PSA)
+#define OPENTHREAD_CONFIG_CRYPTO_PLATFORM_ALLOCS_CONTEXT 1
 #endif
 
 /**
@@ -778,5 +800,14 @@
 #endif
 
 #endif // SL_CATALOG_OT_SL_LOG_PRESENT
+
+// Thread Direct — both roles are disabled by default; enable per sample app or product config.
+#ifndef OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+#define OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE 0
+#endif
+
+#ifndef OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+#define OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE 0
+#endif
 
 #endif // OPENTHREAD_CORE_EFR32_CONFIG_H_

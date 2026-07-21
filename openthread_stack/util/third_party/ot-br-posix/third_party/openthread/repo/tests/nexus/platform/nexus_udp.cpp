@@ -97,6 +97,12 @@ Error Udp::Send(Ip6::Udp::SocketHandle &aSocket, Message &aMessage, const Ip6::M
             // If we are attached and the peer is on-mesh, we use the Thread interface.
             netifId = Ip6::kNetifThreadHost;
         }
+        else if (!GetNode().Get<Mle::Mle>().IsAttached() && aMessageInfo.GetPeerAddr().IsLinkLocalUnicast())
+        {
+            // Detached node sending to a link-local unicast address: use the Thread radio
+            // path so that TD direct data frames reach the peer via the MAC layer.
+            netifId = Ip6::kNetifThreadHost;
+        }
         else if (Core::Get().FindNodeByInfraIfAddress(aMessageInfo.GetPeerAddr()) != nullptr)
         {
             netifId = Ip6::kNetifBackbone;

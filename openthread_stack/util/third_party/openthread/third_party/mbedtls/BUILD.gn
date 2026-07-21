@@ -57,7 +57,6 @@ group("warnings_fix") {
 }
 
 static_library("mbedtls") {
-  configs += [ ":warnings_fix_config" ]
   sources = [
     "repo/include/mbedtls/aes.h",
     "repo/include/mbedtls/aria.h",

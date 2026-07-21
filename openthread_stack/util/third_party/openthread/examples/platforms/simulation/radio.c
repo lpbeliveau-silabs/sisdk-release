@@ -39,6 +39,7 @@
 #include <openthread/platform/alarm-milli.h>
 #include <openthread/platform/diag.h>
 #include <openthread/platform/radio.h>
+#include <openthread/platform/thread_direct.h>
 #include <openthread/platform/time.h>
 
 #include "simul_utils.h"
@@ -760,7 +761,7 @@ void radioTransmit(struct RadioMessage *aMessage, const struct otRadioFrame *aFr
 #else
     struct Event event;
 
-    event.mDelay      = 1; // 1us for now
+    event.mDelay      = 1; // 1 us
     event.mEvent      = OT_SIM_EVENT_RADIO_RECEIVED;
     event.mDataLength = 1 + aFrame->mLength; // include channel in first byte
     memcpy(event.mData, aMessage, event.mDataLength);
@@ -1077,6 +1078,15 @@ static uint8_t generateAckIeData(uint8_t                   *aLinkMetricsIeData,
     }
 #endif
 
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE && (OPENTHREAD_FTD || OPENTHREAD_MTD)
+    if (otMacFrameIsTdLinkCommand(aReceivedFrame))
+    {
+        uint8_t available = (uint8_t)(OT_ACK_IE_MAX_SIZE - offset);
+
+        offset += otMacFrameGenerateThreadDirectEnhAckIe(aReceivedFrame, sAckIeData + offset, available);
+    }
+#endif
+
     return offset;
 }
 #endif
@@ -1160,6 +1170,54 @@ void otPlatRadioSetMacFrameCounter(otInstance *aInstance, uint32_t aMacFrameCoun
 
     sRadioContext.mMacFrameCounter = aMacFrameCounter;
 }
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+void otPlatRadioSetWakeKey(otInstance *aInstance, uint8_t aKeyIndex, const otMacKeyMaterial *aWakeKey)
+{
+    OT_UNUSED_VARIABLE(aInstance);
+    OT_UNUSED_VARIABLE(aKeyIndex);
+    OT_UNUSED_VARIABLE(aWakeKey);
+}
+#endif
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+otError otPlatRadioSetThreadDirectSlwSchedule(otInstance *aInstance, uint16_t aSlwPeriod, uint32_t aSlotDurationUs)
+{
+    OT_UNUSED_VARIABLE(aInstance);
+    sRadioContext.mSlwPresent        = (aSlwPeriod != 0);
+    sRadioContext.mSlwPeriod         = aSlwPeriod;
+    sRadioContext.mSlwSlotDurationUs = aSlotDurationUs;
+    sRadioContext.mRamOffsetUs       = 0;
+    return OT_ERROR_NONE;
+}
+
+void otPlatRadioUpdateThreadDirectSlwSampleTime(otInstance *aInstance, uint32_t aSlwSampleTime)
+{
+    OT_UNUSED_VARIABLE(aInstance);
+    sRadioContext.mSlwSampleTime = aSlwSampleTime;
+}
+
+uint8_t otPlatRadioGetThreadDirectSlwAccuracy(otInstance *aInstance)
+{
+    OT_UNUSED_VARIABLE(aInstance);
+    return 255;
+}
+
+uint8_t otPlatRadioGetThreadDirectSlwUncertainty(otInstance *aInstance)
+{
+    OT_UNUSED_VARIABLE(aInstance);
+    return 255;
+}
+#endif // OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+otError otPlatRadioGetThreadDirectRamParams(otInstance *aInstance, otThreadDirectRamParams *aParams)
+{
+    OT_UNUSED_VARIABLE(aInstance);
+    OT_UNUSED_VARIABLE(aParams);
+    return OT_ERROR_NOT_IMPLEMENTED;
+}
+#endif
 
 otError otPlatRadioSetChannelMaxTransmitPower(otInstance *aInstance, uint8_t aChannel, int8_t aMaxPower)
 {

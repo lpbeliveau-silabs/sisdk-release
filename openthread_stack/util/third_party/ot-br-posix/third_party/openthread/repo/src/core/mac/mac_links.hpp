@@ -480,7 +480,39 @@ public:
     }
 #endif // OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
 
-#if OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+    /**
+     * Configures Thread Direct SLW receive scheduling in all radios.
+     *
+     * @param[in]  aEnable       Whether to enable or disable local SLW receive scheduling.
+     * @param[in]  aPeriodUs     The SLW period in microseconds for local timer scheduling.
+     * @param[in]  aPeriodSlots  The SLW period in slot-duration units for radio-platform state.
+     * @param[in]  aSlotDurationUs  The advertised SLW Slot Duration, in microseconds.
+     * @param[in]  aChannel      The Thread channel used for SLW sampling.
+     * @param[in]  aSampleTimeRadio
+     *                          Desired first SLW sample time in radio microseconds,
+     *                          or zero to anchor from the current radio time.
+     */
+    void UpdateThreadDirectSlw(bool     aEnable,
+                               uint32_t aPeriodUs,
+                               uint16_t aPeriodSlots,
+                               uint32_t aSlotDurationUs,
+                               uint8_t  aChannel,
+                               uint32_t aSampleTimeRadio = 0)
+    {
+        OT_UNUSED_VARIABLE(aEnable);
+        OT_UNUSED_VARIABLE(aPeriodUs);
+        OT_UNUSED_VARIABLE(aPeriodSlots);
+        OT_UNUSED_VARIABLE(aSlotDurationUs);
+        OT_UNUSED_VARIABLE(aChannel);
+        OT_UNUSED_VARIABLE(aSampleTimeRadio);
+#if OPENTHREAD_CONFIG_RADIO_LINK_IEEE_802_15_4_ENABLE
+        mSubMac.UpdateThreadDirectSlw(aEnable, aPeriodUs, aPeriodSlots, aSlotDurationUs, aChannel, aSampleTimeRadio);
+#endif
+    }
+#endif
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
     /**
      * Configures wake-up listening parameters in all radios.
      *

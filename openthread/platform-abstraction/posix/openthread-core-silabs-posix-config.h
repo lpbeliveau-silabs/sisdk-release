@@ -169,7 +169,6 @@ sudo INFRA_IF_NAME=eth0 \
 /******************************************************************************
  * Vendor defaults
  *****************************************************************************/
-
 /**
  * OPENTHREAD_POSIX_CONFIG_SPINEL_VENDOR_INTERFACE_URL_PROTOCOL_NAME
  *

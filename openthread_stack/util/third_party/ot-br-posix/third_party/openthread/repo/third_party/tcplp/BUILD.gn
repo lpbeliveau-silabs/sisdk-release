@@ -35,8 +35,13 @@ config("warnings_fix_config") {
   ]
 }
 
+group("warnings_fix") {
+  public_configs = [
+    ":warnings_fix_config",
+  ]
+}
+
 static_library("tcplp") {
-  configs += [ ":warnings_fix_config" ]
   sources = [
     "bsdtcp/tcp_seq.h",
     "bsdtcp/tcp_output.c",
@@ -71,5 +76,8 @@ static_library("tcplp") {
     "lib/lbuf.c",
     "lib/test/test_all.c",
   ]
-  deps = [ "../../include/openthread" ]
+  deps = [
+    ":warnings_fix",
+    "../../include/openthread",
+  ]
 }

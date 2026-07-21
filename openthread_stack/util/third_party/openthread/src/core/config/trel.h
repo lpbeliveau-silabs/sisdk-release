@@ -57,35 +57,6 @@
 #endif
 
 /**
- * @def OPENTHREAD_CONFIG_TREL_DELEGATE_INFRA_TO_HOST_ENABLE
- *
- * Define as 1 when TREL runs on a device without a local infrastructure interface and delegates
- * infrastructure operations to the connected host.
- *
- * This applies to NCP (Network Co-Processor) builds where the full Thread stack runs on the
- * co-processor and the infrastructure interface is provided by the host over Spinel.
- */
-#ifndef OPENTHREAD_CONFIG_TREL_DELEGATE_INFRA_TO_HOST_ENABLE
-#define OPENTHREAD_CONFIG_TREL_DELEGATE_INFRA_TO_HOST_ENABLE 0
-#endif
-
-/**
- * @def OPENTHREAD_CONFIG_TREL_DNSSD_DISCOVERY_STABILIZATION_ENABLE
- *
- * Define as 1 to enable extra handling for platform DNS-SD browse/remove races when discovering TREL peers:
- * debouncing browse REMOVE events, resolve epoch tracking to ignore stale resolver callbacks, and soft refresh
- * on re-discovery.
- *
- * Requires `OPENTHREAD_CONFIG_TREL_MANAGE_DNSSD_ENABLE`.
- *
- * Intended for NCP architectures where DNS-SD is proxied through a host (e.g., OTBR). Defaults to disabled so
- * POSIX/RCP builds retain upstream discovery behavior.
- */
-#ifndef OPENTHREAD_CONFIG_TREL_DNSSD_DISCOVERY_STABILIZATION_ENABLE
-#define OPENTHREAD_CONFIG_TREL_DNSSD_DISCOVERY_STABILIZATION_ENABLE 0
-#endif
-
-/**
  * @def OPENTHREAD_CONFIG_TREL_USE_HEAP_ENABLE
  *
  * Define as 1 to allow TREL modules to use heap allocated objects (e.g. for the TREL peer table).

@@ -27,6 +27,7 @@
  */
 
 #include <openthread/platform/radio.h>
+#include <openthread/platform/thread_direct.h>
 
 #include "nexus_core.hpp"
 #include "nexus_node.hpp"
@@ -357,6 +358,84 @@ otError otPlatRadioConfigureEnhAckProbing(otInstance         *aInstance,
     return AsNode(aInstance).mRadio.ConfigureEnhAckProbing(aShortAddress, AsCoreTypePtr(aExtAddress), aLinkMetrics);
 }
 
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+otError otPlatRadioReceiveAt(otInstance *aInstance, uint8_t aChannel, uint32_t aStart, uint32_t aDuration)
+{
+    OT_UNUSED_VARIABLE(aStart);
+    OT_UNUSED_VARIABLE(aDuration);
+
+    Radio &radio = AsNode(aInstance).mRadio;
+
+    if (radio.mState == Radio::kStateReceive || radio.mState == Radio::kStateTransmit)
+    {
+        radio.mChannel = aChannel;
+    }
+
+    return kErrorNone;
+}
+#endif // OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+void otPlatRadioSetWakeKey(otInstance *aInstance, uint8_t aKeyIndex, const otMacKeyMaterial *aWakeKey)
+{
+    Radio &radio = AsNode(aInstance).mRadio;
+
+    if (aKeyIndex < OT_MAC_FRAME_WAKE_KEY_INDEX || aKeyIndex > OT_MAC_FRAME_GUEST_WAKE_KEY_INDEX_MAX)
+    {
+        return;
+    }
+
+    uint8_t idx = aKeyIndex - OT_MAC_FRAME_WAKE_KEY_INDEX;
+
+    if (aWakeKey != nullptr)
+    {
+        radio.mWakeKeys[idx]   = *aWakeKey;
+        radio.mWakeKeySet[idx] = true;
+    }
+    else
+    {
+        radio.mWakeKeySet[idx] = false;
+    }
+}
+#endif
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+otError otPlatRadioSetThreadDirectSlwSchedule(otInstance *aInstance, uint16_t aSlwPeriod, uint32_t aSlotDurationUs)
+{
+    OT_UNUSED_VARIABLE(aInstance);
+    OT_UNUSED_VARIABLE(aSlwPeriod);
+    OT_UNUSED_VARIABLE(aSlotDurationUs);
+    return kErrorNone;
+}
+
+void otPlatRadioUpdateThreadDirectSlwSampleTime(otInstance *aInstance, uint32_t aSlwSampleTime)
+{
+    OT_UNUSED_VARIABLE(aInstance);
+    OT_UNUSED_VARIABLE(aSlwSampleTime);
+}
+
+uint8_t otPlatRadioGetThreadDirectSlwAccuracy(otInstance *aInstance)
+{
+    OT_UNUSED_VARIABLE(aInstance);
+    return 255;
+}
+
+uint8_t otPlatRadioGetThreadDirectSlwUncertainty(otInstance *aInstance)
+{
+    OT_UNUSED_VARIABLE(aInstance);
+    return 255;
+}
+#endif // OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+otError otPlatRadioGetThreadDirectRamParams(otInstance *aInstance, otThreadDirectRamParams *aParams)
+{
+    OT_UNUSED_VARIABLE(aInstance);
+    OT_UNUSED_VARIABLE(aParams);
+    return kErrorNotImplemented;
+}
+#endif
+
 } // extern "C"
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -374,6 +453,10 @@ Radio::Radio(void)
     mExtAddress.Clear();
     ClearAllBytes(mRadioContext);
     mTxFrame.mInfo.mTxInfo.mIeInfo = &mTxIeInfo;
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    ClearAllBytes(mWakeKeys);
+    memset(mWakeKeySet, 0, sizeof(mWakeKeySet));
+#endif
 }
 
 void Radio::Reset(void)
@@ -391,6 +474,10 @@ void Radio::Reset(void)
     mLinkMetricsEntries.Clear();
     ClearAllBytes(mRadioContext);
     mTxFrame.mInfo.mTxInfo.mIeInfo = &mTxIeInfo;
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    ClearAllBytes(mWakeKeys);
+    memset(mWakeKeySet, 0, sizeof(mWakeKeySet));
+#endif
 }
 
 Error Radio::ConfigureEnhAckProbing(Mac::ShortAddress      aShortAddress,

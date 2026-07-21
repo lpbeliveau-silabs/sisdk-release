@@ -851,7 +851,12 @@ void Core::ProcessRadio(Node &aNode)
 
         if (rxFrame.IsVersion2015())
         {
+            // Use a buffer large enough for standard IEs plus the TD Thread Header IE.
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+            uint8_t ackIeData[OT_ACK_IE_MAX_SIZE + Radio::kTdEnhAckIeMaxSize];
+#else
             uint8_t ackIeData[OT_ACK_IE_MAX_SIZE];
+#endif
             uint8_t ackIeDataLength = 0;
 
 #if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
@@ -884,8 +889,56 @@ void Core::ProcessRadio(Node &aNode)
                 }
             }
 #endif
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+            // Identify TD Link Command by unencrypted header fields (payload is still encrypted here).
+            {
+                uint8_t keyId       = 0;
+                bool    isTdLinkCmd = aNode.mRadio.mTxFrame.GetAckRequest() && aNode.mRadio.mTxFrame.IsIePresent() &&
+                                   (aNode.mRadio.mTxFrame.GetKeyId(keyId) == ot::kErrorNone) &&
+                                   keyId >= OT_MAC_FRAME_WAKE_KEY_INDEX &&
+                                   keyId <= OT_MAC_FRAME_GUEST_WAKE_KEY_INDEX_MAX;
+
+                if (isTdLinkCmd)
+                {
+                    uint8_t available =
+                        static_cast<uint8_t>((OT_ACK_IE_MAX_SIZE + Radio::kTdEnhAckIeMaxSize) - ackIeDataLength);
+                    ackIeDataLength += otMacFrameGenerateThreadDirectEnhAckIe(&aNode.mRadio.mTxFrame,
+                                                                              ackIeData + ackIeDataLength, available);
+                }
+
+                SuccessOrExit(
+                    ackFrame.GenerateEnhAck(rxFrame, (ackMode == kSendAckFramePending), ackIeData, ackIeDataLength));
+
+                // For a TD Link Command Enh-ACK, encrypt with the wake key (key ID 129 or guest key).
+                if (isTdLinkCmd)
+                {
+                    uint8_t                 ackKeyId = 0;
+                    const otMacKeyMaterial *wakeKey  = nullptr;
+
+                    if (ackFrame.GetKeyId(ackKeyId) == kErrorNone && ackKeyId >= OT_MAC_FRAME_WAKE_KEY_INDEX &&
+                        ackKeyId <= OT_MAC_FRAME_GUEST_WAKE_KEY_INDEX_MAX)
+                    {
+                        uint8_t idx = static_cast<uint8_t>(ackKeyId - OT_MAC_FRAME_WAKE_KEY_INDEX);
+
+                        if (ackNode->mRadio.mWakeKeySet[idx])
+                        {
+                            wakeKey = &ackNode->mRadio.mWakeKeys[idx];
+                        }
+                    }
+
+                    if (wakeKey != nullptr)
+                    {
+                        otMacFrameSetFrameCounter(&ackFrame, ackNode->mRadio.mRadioContext.mMacFrameCounter++);
+                        ackFrame.mInfo.mTxInfo.mIsHeaderUpdated = true;
+                        ackFrame.mInfo.mTxInfo.mAesKey          = wakeKey;
+                        otMacFrameProcessTransmitAesCcm(&ackFrame, &ackNode->mRadio.mRadioContext.mExtAddress);
+                    }
+                }
+            }
+#else
             SuccessOrExit(
                 ackFrame.GenerateEnhAck(rxFrame, (ackMode == kSendAckFramePending), ackIeData, ackIeDataLength));
+#endif
             SuccessOrExit(otMacFrameProcessTxSfd(&ackFrame, mNow, &ackNode->mRadio.mRadioContext));
         }
         else

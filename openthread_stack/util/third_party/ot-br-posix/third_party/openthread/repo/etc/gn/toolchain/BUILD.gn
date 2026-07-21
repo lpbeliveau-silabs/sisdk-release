@@ -26,6 +26,13 @@
 #
 
 toolchain("toolchain") {
+  diagnostic_cflags = [
+    "-Werror",
+    "-Wall",
+    "-Wextra",
+    "-Wundef",
+    "-Wformat-nonliteral",
+  ]
   if (use_clang) {
     cc = "clang"
     cxx = "clang++"
@@ -33,9 +40,7 @@ toolchain("toolchain") {
     cc = "gcc"
     cxx = "g++"
   }
-  # Warning/diagnostic flags come from GN target configs ({{cflags}}), not from
-  # a global toolchain preset, so nothing is prepended here.
-  cflags = ""
+  cflags = string_join(" ", diagnostic_cflags)
 
   tool("cc") {
     depfile = "{{output}}.d"

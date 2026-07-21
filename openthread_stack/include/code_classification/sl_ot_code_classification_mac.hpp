@@ -94,10 +94,22 @@ constexpr uint8_t kTxNumBcast = OPENTHREAD_CONFIG_MAC_TX_NUM_BCAST; ///< Num of 
  */
 constexpr uint16_t kCslRequestAhead = OPENTHREAD_CONFIG_MAC_CSL_REQUEST_AHEAD_US;
 
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+constexpr uint32_t kDirectRequestAhead = OPENTHREAD_CONFIG_THREAD_DIRECT_SCHEDULED_TX_REQUEST_AHEAD_US;
+
+struct ThreadDirectTxSchedule
+{
+    uint64_t mWindowStart;
+    uint32_t mTxDelay;
+    uint32_t mTxDelayBaseTime;
+    uint32_t mRequestAheadUs;
+};
+#endif
+
 constexpr uint16_t kMinCslIePeriod = OPENTHREAD_CONFIG_MAC_CSL_MIN_PERIOD;
 
-constexpr uint32_t kDefaultWedListenInterval = OPENTHREAD_CONFIG_WED_LISTEN_INTERVAL;
-constexpr uint32_t kDefaultWedListenDuration = OPENTHREAD_CONFIG_WED_LISTEN_DURATION;
+constexpr uint32_t kDefaultWlListenInterval = OPENTHREAD_CONFIG_THREAD_DIRECT_LISTEN_INTERVAL_US;
+constexpr uint32_t kDefaultWlListenDuration = OPENTHREAD_CONFIG_THREAD_DIRECT_LISTEN_DURATION_US;
 
 /**
  * Defines the function pointer which is called during an Energy Scan when the scan result for a channel is
@@ -218,6 +230,16 @@ public:
     SL_CODE_CLASSIFY(SL_CODE_COMPONENT_OPENTHREAD, SL_CODE_CLASS_TIME_CRITICAL)
     void RequestDirectFrameTransmission(void);
 
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    /**
+     * Requests a Thread Direct scheduled direct data frame transmission.
+     *
+     * @param[in] aDelayUs  Delay until MAC should promote the request to active TX, in microseconds.
+     */
+    SL_CODE_CLASSIFY(SL_CODE_COMPONENT_OPENTHREAD, SL_CODE_CLASS_TIME_CRITICAL)
+    void RequestThreadDirectFrameTransmission(uint32_t aDelayUs);
+#endif
+
 #if OPENTHREAD_FTD
     /**
      * Requests an indirect data frame transmission.
@@ -236,7 +258,17 @@ public:
     void RequestCslFrameTransmission(uint32_t aDelay);
 #endif
 
-#if OPENTHREAD_CONFIG_WAKEUP_COORDINATOR_ENABLE
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    SL_CODE_CLASSIFY(SL_CODE_COMPONENT_OPENTHREAD, SL_CODE_CLASS_TIME_CRITICAL)
+    Error CalculateThreadDirectTxSchedule(const Address          &aDestAddress,
+                                          uint16_t                aFrameLength,
+                                          ThreadDirectTxSchedule &aSchedule) const;
+
+    SL_CODE_CLASSIFY(SL_CODE_COMPONENT_OPENTHREAD, SL_CODE_CLASS_TIME_CRITICAL)
+    void ApplyThreadDirectTxSchedule(TxFrame &aFrame, const ThreadDirectTxSchedule &aSchedule) const;
+#endif
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
     /**
      * Requests `Mac` to start a wake-up frame transmission.
      */
@@ -776,7 +808,7 @@ public:
     SL_CODE_CLASSIFY(SL_CODE_COMPONENT_OPENTHREAD, SL_CODE_CLASS_TIME_CRITICAL)
     uint8_t GetWakeupChannel(void) const { return mWakeupChannel; }
 
-#if OPENTHREAD_CONFIG_WAKEUP_COORDINATOR_ENABLE || OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
     /**
      * Sets the wake-up channel.
      *
@@ -789,7 +821,7 @@ public:
     Error SetWakeupChannel(uint8_t aChannel);
 #endif
 
-#if OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
     /**
      * Gets the wake-up listen parameters.
      *
@@ -834,7 +866,7 @@ public:
      */
     SL_CODE_CLASSIFY(SL_CODE_COMPONENT_OPENTHREAD, SL_CODE_CLASS_TIME_CRITICAL)
     bool IsWakeupListenEnabled(void) const { return mWakeupListenEnabled; }
-#endif // OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
+#endif // OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
 
     /**
      * Calculates the radio bus transfer time (in microseconds) for a given frame size based on `Radio::GetBusSpeed()`
@@ -857,6 +889,9 @@ private:
         kOperationEnergyScan,
         kOperationTransmitBeacon,
         kOperationTransmitDataDirect,
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+        kOperationTransmitDataDirectTd,
+#endif
         kOperationTransmitPoll,
         kOperationWaitingForData,
 #if OPENTHREAD_FTD
@@ -865,7 +900,7 @@ private:
 #if OPENTHREAD_CONFIG_MAC_CSL_TRANSMITTER_ENABLE
         kOperationTransmitDataCsl,
 #endif
-#if OPENTHREAD_CONFIG_WAKEUP_COORDINATOR_ENABLE
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
         kOperationTransmitWakeup,
 #endif
     };
@@ -934,6 +969,12 @@ private:
     bool     HandleMacCommand(RxFrame &aFrame);
     SL_CODE_CLASSIFY(SL_CODE_COMPONENT_OPENTHREAD, SL_CODE_CLASS_TIME_CRITICAL)
     void     HandleTimer(void);
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    SL_CODE_CLASSIFY(SL_CODE_COMPONENT_OPENTHREAD, SL_CODE_CLASS_TIME_CRITICAL)
+    void     HandleDirectTxTimer(void);
+    SL_CODE_CLASSIFY(SL_CODE_COMPONENT_OPENTHREAD, SL_CODE_CLASS_TIME_CRITICAL)
+    bool     ShouldStartThreadDirectTxNow(void) const;
+#endif
     SL_CODE_CLASSIFY(SL_CODE_COMPONENT_OPENTHREAD, SL_CODE_CLASS_TIME_CRITICAL)
     void  Scan(Operation aScanOperation, uint32_t aScanChannels, uint16_t aScanDuration);
     SL_CODE_CLASSIFY(SL_CODE_COMPONENT_OPENTHREAD, SL_CODE_CLASS_TIME_CRITICAL)
@@ -972,7 +1013,7 @@ private:
     SL_CODE_CLASSIFY(SL_CODE_COMPONENT_OPENTHREAD, SL_CODE_CLASS_TIME_CRITICAL)
     void ProcessEnhAckProbing(const RxFrame &aFrame, const Neighbor &aNeighbor);
 #endif
-#if OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
     SL_CODE_CLASSIFY(SL_CODE_COMPONENT_OPENTHREAD, SL_CODE_CLASS_TIME_CRITICAL)
     Error HandleWakeupFrame(const RxFrame &aFrame);
     SL_CODE_CLASSIFY(SL_CODE_COMPONENT_OPENTHREAD, SL_CODE_CLASS_TIME_CRITICAL)
@@ -983,6 +1024,9 @@ private:
 
     using OperationTask = TaskletIn<Mac, &Mac::PerformNextOperation>;
     using MacTimer      = TimerMilliIn<Mac, &Mac::HandleTimer>;
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    using DirectTxTimer = TimerMicroIn<Mac, &Mac::HandleDirectTxTimer>;
+#endif
 
     static const otExtAddress sMode2ExtAddress;
 
@@ -996,7 +1040,7 @@ private:
     bool mShouldDelaySleep : 1;
     bool mDelayingSleep : 1;
 #endif
-#if OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
     bool mWakeupListenEnabled : 1;
 #endif
     Operation   mOperation;
@@ -1018,6 +1062,9 @@ private:
 #if OPENTHREAD_CONFIG_MAC_CSL_TRANSMITTER_ENABLE
     TimeMilli mCslTxFireTime;
 #endif
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    TimeMicro mDirectTxFireTime;
+#endif
 #if OPENTHREAD_CONFIG_MAC_CSL_RECEIVER_ENABLE
     bool mIsCslEnabled : 1;
     bool mIsCslCapable : 1;
@@ -1026,7 +1073,7 @@ private:
     uint16_t mCslPeriod;
 #endif
     uint8_t mWakeupChannel;
-#if OPENTHREAD_CONFIG_WAKEUP_END_DEVICE_ENABLE
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
     uint32_t mWakeupListenInterval;
     uint32_t mWakeupListenDuration;
 #endif
@@ -1039,6 +1086,9 @@ private:
     Links              mLinks;
     OperationTask      mOperationTask;
     MacTimer           mTimer;
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    DirectTxTimer      mDirectTxTimer;
+#endif
     Counters           mCounters;
     uint32_t           mKeyIdMode2FrameCounter;
     SuccessRateTracker mCcaSuccessRateTracker;

@@ -105,6 +105,18 @@ struct Radio
     Array<Mac::ExtAddress, kMaxSrcMatchExt> mSrcMatchExtEntries;
 
     Array<LinkMetricsInfo, OPENTHREAD_CONFIG_MLE_LINK_METRICS_MAX_SERIES_SUPPORTED> mLinkMetricsEntries;
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    // Flat array covering key indices 129 (default) through 192 (max guest), 64 slots total.
+    static constexpr uint8_t kWakeKeyCount = OT_MAC_FRAME_GUEST_WAKE_KEY_INDEX_MAX - OT_MAC_FRAME_WAKE_KEY_INDEX + 1;
+
+    otMacKeyMaterial mWakeKeys[kWakeKeyCount];
+    bool             mWakeKeySet[kWakeKeyCount];
+#endif
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+    static constexpr uint8_t kTdEnhAckIeMaxSize = 64;
+#endif
 };
 
 } // namespace Nexus

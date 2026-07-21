@@ -366,7 +366,6 @@ openthread_core_files = [
   "api/netdata_publisher_api.cpp",
   "api/netdiag_api.cpp",
   "api/network_time_api.cpp",
-  "api/p2p_api.cpp",
   "api/ping_sender_api.cpp",
   "api/radio_stats_api.cpp",
   "api/random_crypto_api.cpp",
@@ -382,6 +381,7 @@ openthread_core_files = [
   "api/tcp_api.cpp",
   "api/tcp_ext_api.cpp",
   "api/thread_api.cpp",
+  "api/thread_direct_api.cpp",
   "api/thread_ftd_api.cpp",
   "api/trel_api.cpp",
   "api/udp_api.cpp",
@@ -460,6 +460,8 @@ openthread_core_files = [
   "common/log.cpp",
   "common/log.hpp",
   "common/logging.hpp",
+  "common/ltvs.cpp",
+  "common/ltvs.hpp",
   "common/message.cpp",
   "common/message.hpp",
   "common/message_allocator.hpp",
@@ -529,6 +531,8 @@ openthread_core_files = [
   "mac/data_poll_handler.hpp",
   "mac/data_poll_sender.cpp",
   "mac/data_poll_sender.hpp",
+  "mac/direct_handler.cpp",
+  "mac/direct_handler.hpp",
   "mac/link_raw.cpp",
   "mac/link_raw.hpp",
   "mac/mac.cpp",
@@ -539,6 +543,8 @@ openthread_core_files = [
   "mac/mac_frame.hpp",
   "mac/mac_header_ie.cpp",
   "mac/mac_header_ie.hpp",
+  "mac/mac_header_ltv.cpp",
+  "mac/mac_header_ltv.hpp",
   "mac/mac_links.cpp",
   "mac/mac_links.hpp",
   "mac/mac_types.cpp",
@@ -549,7 +555,7 @@ openthread_core_files = [
   "mac/sub_mac.hpp",
   "mac/sub_mac_callbacks.cpp",
   "mac/sub_mac_csl_receiver.cpp",
-  "mac/sub_mac_wed.cpp",
+  "mac/sub_mac_wl.cpp",
   "mac/wakeup_tx_scheduler.cpp",
   "mac/wakeup_tx_scheduler.hpp",
   "meshcop/border_agent.cpp",
@@ -693,6 +699,10 @@ openthread_core_files = [
   "thread/child_table.hpp",
   "thread/csl_tx_scheduler.cpp",
   "thread/csl_tx_scheduler.hpp",
+  "thread/direct_peer.cpp",
+  "thread/direct_peer.hpp",
+  "thread/direct_peer_table.cpp",
+  "thread/direct_peer_table.hpp",
   "thread/discover_scanner.cpp",
   "thread/discover_scanner.hpp",
   "thread/dua_manager.cpp",
@@ -722,7 +732,6 @@ openthread_core_files = [
   "thread/mle.cpp",
   "thread/mle.hpp",
   "thread/mle_ftd.cpp",
-  "thread/mle_p2p.cpp",
   "thread/mle_tlvs.cpp",
   "thread/mle_tlvs.hpp",
   "thread/mle_types.cpp",
@@ -759,10 +768,6 @@ openthread_core_files = [
   "thread/network_diagnostic_types.hpp",
   "thread/panid_query_server.cpp",
   "thread/panid_query_server.hpp",
-  "thread/peer.cpp",
-  "thread/peer.hpp",
-  "thread/peer_table.cpp",
-  "thread/peer_table.hpp",
   "thread/radio_selector.cpp",
   "thread/radio_selector.hpp",
   "thread/router.cpp",
@@ -856,7 +861,7 @@ openthread_radio_sources = [
   "mac/sub_mac.cpp",
   "mac/sub_mac_callbacks.cpp",
   "mac/sub_mac_csl_receiver.cpp",
-  "mac/sub_mac_wed.cpp",
+  "mac/sub_mac_wl.cpp",
   "radio/radio.cpp",
   "radio/radio_callbacks.cpp",
   "radio/radio_platform.cpp",
@@ -911,7 +916,6 @@ source_set("libopenthread_core_config") {
     "config/netdata_publisher.h",
     "config/network_diagnostic.h",
     "config/openthread-core-config-check.h",
-    "config/p2p.h",
     "config/parent_search.h",
     "config/ping_sender.h",
     "config/platform.h",
@@ -921,10 +925,10 @@ source_set("libopenthread_core_config") {
     "config/sntp_client.h",
     "config/srp_client.h",
     "config/srp_server.h",
+    "config/thread_direct.h",
     "config/time_sync.h",
     "config/tmf.h",
     "config/trel.h",
-    "config/wakeup.h",
     "openthread-core-config.h",
   ]
   public_configs = [
@@ -959,7 +963,6 @@ group("libopenthread_platform") {
 }
 
 static_library("libopenthread-ftd") {
-  configs += [ "../..:openthread_private_flags" ]
   sources = openthread_core_sources
   if (openthread_enable_core_config_args && openthread_config_tcp_enable) {
     deps = [ "../../third_party/tcplp" ]
@@ -969,7 +972,6 @@ static_library("libopenthread-ftd") {
 }
 
 static_library("libopenthread-mtd") {
-  configs += [ "../..:openthread_private_flags" ]
   sources = openthread_core_sources
   if (openthread_enable_core_config_args && openthread_config_tcp_enable) {
     deps = [ "../../third_party/tcplp" ]
@@ -979,7 +981,6 @@ static_library("libopenthread-mtd") {
 }
 
 static_library("libopenthread-radio") {
-  configs += [ "../..:openthread_private_flags" ]
   sources = openthread_radio_sources
   public_deps = [ ":libopenthread_platform" ]
   public_configs = [ "../..:openthread_radio_config" ]

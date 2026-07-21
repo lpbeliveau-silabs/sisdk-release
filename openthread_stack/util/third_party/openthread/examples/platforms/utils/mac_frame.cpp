@@ -33,7 +33,11 @@
 #include <openthread/platform/radio.h>
 
 #include "common/code_utils.hpp"
+#include "common/encoding.hpp"
+#include "common/frame_builder.hpp"
+#include "common/ltvs.hpp"
 #include "mac/mac_frame.hpp"
+#include "mac/mac_header_ltv.hpp"
 
 using namespace ot;
 
@@ -309,6 +313,138 @@ static uint16_t ComputeCslPhase(uint32_t aRadioTime, otRadioContext *aRadioConte
            OT_US_PER_TEN_SYMBOLS;
 }
 #endif
+
+#if (OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE) && \
+    (OPENTHREAD_FTD || OPENTHREAD_MTD)
+
+constexpr uint32_t kDefaultSlwSlotDurationUs = 625u;
+
+static uint16_t ComputeSlwPhase(uint32_t aRadioTime, const otRadioContext *aRadioContext)
+{
+    // SLW start time = frame TX time + RAM offset + SLW phase (all in Slot Duration units).
+    // Adjust the reference by subtracting the RAM offset before computing the phase.
+    uint32_t slotDurationUs =
+        (aRadioContext->mSlwSlotDurationUs != 0) ? aRadioContext->mSlwSlotDurationUs : kDefaultSlwSlotDurationUs;
+    uint32_t adjustedUs =
+        aRadioContext->mSlwSampleTime - aRadioTime - static_cast<uint32_t>(aRadioContext->mRamOffsetUs);
+
+    return static_cast<uint16_t>(adjustedUs % (static_cast<uint32_t>(aRadioContext->mSlwPeriod) * slotDurationUs) /
+                                 slotDurationUs);
+}
+
+void otMacFrameSetThreadDirectScaLtv(otRadioFrame *aFrame,
+                                     uint16_t      aSlwPeriod,
+                                     uint16_t      aSlwPhase,
+                                     int16_t       aRamOffsetUs)
+{
+    using namespace ot;
+    using namespace ot::Mac;
+    using namespace ot::LittleEndian;
+
+    enum : uint16_t
+    {
+        kScaRamOffsetShift    = 2,
+        kScaRamOffsetMask     = 0x07FFu,
+        kScaRamAvailableShift = 13,
+    };
+
+    assert(aFrame != nullptr);
+    assert(aRamOffsetUs >= ScaParams::kRamOffsetUsMin && aRamOffsetUs <= ScaParams::kRamOffsetUsMax);
+
+    Frame   &frame    = *static_cast<Frame *>(aFrame);
+    uint8_t *threadIe = frame.GetHeaderIe(ThreadHeaderIe::kElementId);
+
+    if (threadIe == nullptr)
+    {
+        return;
+    }
+
+    uint8_t  ieLen   = reinterpret_cast<const HeaderIe *>(threadIe)->GetLength();
+    uint8_t *content = threadIe + sizeof(HeaderIe);
+
+    // Scan the packed LTV stream to find the SCA LTV and write RAM offset field
+    // plus the SLW period and phase assuming RAM available bit is false.
+    PackedLtvStream::Iterator iter;
+    iter.Init(content, ieLen);
+
+    while (!iter.IsDone())
+    {
+        // SCA LTV payload: [2B fixed-hdr][2-12 bits RAM offset][2B SLW period][2B SLW phase]
+        // Consider the RAM available field to be 0 for phase-1 to compute period and phase offsets.
+        if (iter.GetType() == ThreadHeaderIe::kTypeSca && iter.GetLength() >= 6)
+        {
+            uint8_t *value      = content + iter.GetValueOffset();
+            uint16_t fixedHdr   = ReadUint16(value);
+            bool     hasRamBits = ((fixedHdr >> kScaRamAvailableShift) & 0x01u) != 0;
+
+            fixedHdr = static_cast<uint16_t>(
+                (fixedHdr & ~(kScaRamOffsetMask << kScaRamOffsetShift)) |
+                ((static_cast<uint16_t>(aRamOffsetUs) & kScaRamOffsetMask) << kScaRamOffsetShift));
+            WriteUint16(fixedHdr, value);
+
+            // TODO: Handle the RAM-available layout when implementation starts
+            // advertising RAM Duration and RAM Bits in the SCA payload to calculate
+            // the period and phase offsets. OR
+            // Remove this function and modify otMacFrameSetScaLtvPhase to take period and ramoffset.
+            if (hasRamBits)
+            {
+                assert(false); // RAM available is not supported in phase-1.
+            }
+
+            WriteUint16(aSlwPeriod, value + 2U);
+            WriteUint16(aSlwPhase, value + 4u);
+            return;
+        }
+
+        IgnoreError(iter.Advance());
+    }
+}
+#endif // (OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || WAKE_LISTENER_ENABLE) && (OPENTHREAD_FTD ||
+       // OPENTHREAD_MTD)
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+bool otMacFrameCalculateSlwPhaseAndRamOffset(uint32_t  aNextSampleTimeUs,
+                                             uint32_t  aMacHeaderTxTime,
+                                             uint16_t  aPeriodSlots,
+                                             uint32_t  aSlotDurationUs,
+                                             uint16_t *aPhaseSlots,
+                                             int16_t  *aRamOffsetUs)
+{
+    bool     success = false;
+    uint32_t periodUs;
+    uint32_t deltaUs;
+    uint32_t phaseSlots;
+    int32_t  ramOffsetUs;
+
+    assert(aPhaseSlots != nullptr && aRamOffsetUs != nullptr);
+
+    VerifyOrExit((aPeriodSlots != 0) && (aSlotDurationUs != 0));
+
+    // Convert the advertised period slots into absolute time.
+    periodUs = static_cast<uint32_t>(aPeriodSlots) * aSlotDurationUs;
+
+    // Like CSL, compare both timestamps within one SLW period and get the
+    // forward delta from the frame anchor to the next sample point.
+    deltaUs = ((aNextSampleTimeUs % periodUs) - (aMacHeaderTxTime % periodUs) + periodUs) % periodUs;
+
+    // Round the forward delta to the nearest slot index.
+    phaseSlots = (deltaUs + (aSlotDurationUs / 2)) / aSlotDurationUs;
+
+    // Use the remaining time delta as the signed RAM offset.
+    ramOffsetUs = static_cast<int32_t>(deltaUs) - static_cast<int32_t>(phaseSlots * aSlotDurationUs);
+
+    VerifyOrExit(phaseSlots <= aPeriodSlots);
+    VerifyOrExit((ramOffsetUs >= -1024) && (ramOffsetUs <= 1023));
+
+    *aPhaseSlots  = static_cast<uint16_t>(phaseSlots);
+    *aRamOffsetUs = static_cast<int16_t>(ramOffsetUs);
+    success       = true;
+
+exit:
+    return success;
+}
+#endif // OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+
 otError otMacFrameProcessTransmitSecurity(otRadioFrame *aFrame, otRadioContext *aRadioContext)
 {
     otError error = OT_ERROR_NONE;
@@ -318,11 +454,7 @@ otError otMacFrameProcessTransmitSecurity(otRadioFrame *aFrame, otRadioContext *
     uint32_t          frameCounter;
     bool              processKeyId;
 
-    processKeyId =
-#if OPENTHREAD_CONFIG_WAKEUP_COORDINATOR_ENABLE
-        otMacFrameIsKeyIdMode2(aFrame) ||
-#endif
-        otMacFrameIsKeyIdMode1(aFrame);
+    processKeyId = otMacFrameIsKeyIdMode1(aFrame);
 
     VerifyOrExit(otMacFrameIsSecurityEnabled(aFrame) && processKeyId && !aFrame->mInfo.mTxInfo.mIsSecurityProcessed);
 
@@ -411,6 +543,15 @@ otError otMacFrameProcessTxSfd(otRadioFrame *aFrame, uint64_t aRadioTime, otRadi
                            ComputeCslPhase(static_cast<uint32_t>(aRadioTime), aRadioContext));
     }
 #endif
+#if (OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE) && \
+    (OPENTHREAD_FTD || OPENTHREAD_MTD)
+    if (aRadioContext->mSlwPresent)
+    {
+        otMacFrameSetThreadDirectScaLtv(aFrame, aRadioContext->mSlwPeriod,
+                                        ComputeSlwPhase(static_cast<uint32_t>(aRadioTime), aRadioContext),
+                                        aRadioContext->mRamOffsetUs);
+    }
+#endif
 #if OPENTHREAD_CONFIG_TIME_SYNC_ENABLE
     otMacFrameUpdateTimeIe(aFrame, aRadioTime, aRadioContext);
 #endif
@@ -448,3 +589,111 @@ bool otMacFrameSrcAddrMatchCslReceiverPeer(const otRadioFrame *aFrame, const otR
 exit:
     return matches;
 }
+
+#if (OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE) && \
+    (OPENTHREAD_FTD || OPENTHREAD_MTD)
+
+bool otMacFrameIsTdLinkCommand(const otRadioFrame *aFrame)
+{
+    const Mac::Frame &frame = *static_cast<const Mac::Frame *>(aFrame);
+
+    return frame.IsThreadDirectLinkCommand();
+}
+#endif
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+void otMacFrameSetScaLtvPhase(otRadioFrame *aFrame, uint16_t aPhase)
+{
+    static_cast<Mac::TxFrame *>(aFrame)->SetScaLtvPhase(aPhase);
+}
+#endif
+
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE && (OPENTHREAD_FTD || OPENTHREAD_MTD)
+
+bool otMacFrameIsTdWakeCommand(otRadioFrame *aFrame)
+{
+    uint8_t keyId;
+
+    if (!otMacFrameIsCommand(aFrame) || otMacFrameIsAckRequested(aFrame) || !otMacFrameIsSecurityEnabled(aFrame) ||
+        !otMacFrameIsKeyIdMode1(aFrame))
+    {
+        return false;
+    }
+
+    keyId = otMacFrameGetKeyId(aFrame);
+
+    return keyId == OT_MAC_FRAME_WAKE_KEY_INDEX ||
+           (keyId >= OT_MAC_FRAME_GUEST_WAKE_KEY_INDEX_MIN && keyId <= OT_MAC_FRAME_GUEST_WAKE_KEY_INDEX_MAX);
+}
+
+uint8_t otMacFrameGenerateThreadDirectEnhAckIe(const otRadioFrame *aFrame, uint8_t *aDest, uint8_t aDestLen)
+{
+    using namespace ot;
+    using namespace ot::Mac;
+
+    assert(aFrame != nullptr && aDest != nullptr);
+
+    const Frame   &rxFrame  = *static_cast<const Frame *>(aFrame);
+    const uint8_t *threadIe = rxFrame.GetHeaderIe(ThreadHeaderIe::kElementId);
+    uint8_t        written  = 0;
+
+    if (threadIe == nullptr)
+    {
+        return 0;
+    }
+
+    uint8_t ieLen = reinterpret_cast<const HeaderIe *>(threadIe)->GetLength();
+
+    // Scan the incoming frame's packed LTV stream directly — no scratch buffer needed.
+    ChallengeLtv              challenge;
+    bool                      found = false;
+    PackedLtvStream::Iterator iter;
+
+    iter.Init(threadIe + sizeof(HeaderIe), ieLen);
+
+    while (!iter.IsDone())
+    {
+        if (iter.GetType() == ChallengeLtvInfo::kType && iter.GetLength() == sizeof(ChallengeLtv))
+        {
+            memcpy(&challenge, iter.GetValue(), sizeof(ChallengeLtv));
+            found = true;
+            break;
+        }
+
+        IgnoreError(iter.Advance());
+    }
+
+    if (!found)
+    {
+        return 0;
+    }
+
+    uint8_t      plainOut[Ltv::kHeaderSize + sizeof(ChallengeLtv)];
+    uint8_t      packed[1 + sizeof(ChallengeLtv)];
+    uint8_t      ieBuf[sizeof(HeaderIe) + 1 + sizeof(ChallengeLtv)];
+    FrameBuilder plainBuilder;
+    FrameBuilder ieBuilder;
+
+    plainBuilder.Init(plainOut, sizeof(plainOut));
+    IgnoreError(AppendChallengeLtv(plainBuilder, challenge));
+
+    uint8_t packedLen =
+        PackedLtvStream::Encode(plainOut, static_cast<uint8_t>(plainBuilder.GetLength()), packed, sizeof(packed));
+
+    ieBuilder.Init(ieBuf, sizeof(ieBuf));
+    IgnoreError(AppendThreadHeaderIe(ieBuilder, packed, packedLen));
+
+    written = static_cast<uint8_t>(ieBuilder.GetLength());
+
+    if (written > aDestLen)
+    {
+        return 0;
+    }
+
+    memcpy(aDest, ieBuf, written);
+
+    return written;
+}
+
+#endif // OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE && OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+       // && (OPENTHREAD_FTD || OPENTHREAD_MTD)

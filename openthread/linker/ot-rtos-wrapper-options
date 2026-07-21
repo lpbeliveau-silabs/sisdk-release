@@ -884,7 +884,6 @@
 -Xlinker --wrap=otThreadSetNetworkKey
 -Xlinker --wrap=otThreadSetNetworkKeyRef
 -Xlinker --wrap=otThreadSetNetworkName
--Xlinker --wrap=otThreadWakeup
 -Xlinker --wrap=otThreadGetLinkMode
 -Xlinker --wrap=otThreadGetNetworkKeyRef
 -Xlinker --wrap=otThreadGetKeySwitchGuardTime
@@ -910,6 +909,21 @@
 -Xlinker --wrap=otThreadSetKeySequenceCounter
 -Xlinker --wrap=otThreadSetKeySwitchGuardTime
 -Xlinker --wrap=otThreadSetStoreFrameCounterAhead
+-Xlinker --wrap=otThreadDirectIsWakeBurstActive
+-Xlinker --wrap=otThreadDirectIsWakeListenerEnabled
+-Xlinker --wrap=otThreadDirectGetLocalSca
+-Xlinker --wrap=otThreadDirectGetPeerInfo
+-Xlinker --wrap=otThreadDirectRemoveGuestWakeKey
+-Xlinker --wrap=otThreadDirectSendScaUpdate
+-Xlinker --wrap=otThreadDirectSetGuestWakeKey
+-Xlinker --wrap=otThreadDirectSetRamOverride
+-Xlinker --wrap=otThreadDirectSetSlwSchedule
+-Xlinker --wrap=otThreadDirectSetSlwTimeout
+-Xlinker --wrap=otThreadDirectUnlink
+-Xlinker --wrap=otThreadDirectWakeListenerEnable
+-Xlinker --wrap=otThreadDirectWakeup
+-Xlinker --wrap=otThreadDirectGetSlwTimeout
+-Xlinker --wrap=otThreadDirectSetEventCallback
 -Xlinker --wrap=otThreadIsRouterEligible
 -Xlinker --wrap=otThreadIsRouterIdAllocated
 -Xlinker --wrap=otThreadIsTmfOriginFilterEnabled
@@ -974,7 +988,6 @@
 -Xlinker --wrap=otTrelResetCounters
 -Xlinker --wrap=otTrelSetEnabled
 -Xlinker --wrap=otTrelSetFilterEnabled
--Xlinker --wrap=otTrelSetStateChangedCallback
 -Xlinker --wrap=otUdpIsOpen
 -Xlinker --wrap=otUdpIsPortInUse
 -Xlinker --wrap=otUdpAddReceiver

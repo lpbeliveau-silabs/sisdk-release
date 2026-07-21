@@ -42,6 +42,7 @@ source:
 - path: mac/link_raw.cpp
 - path: mac/mac_frame.cpp
 - path: mac/mac_header_ie.cpp
+- path: mac/mac_header_ltv.cpp
 - path: mac/mac_types.cpp
 - path: mac/sub_mac.cpp
 - path: mac/sub_mac_callbacks.cpp

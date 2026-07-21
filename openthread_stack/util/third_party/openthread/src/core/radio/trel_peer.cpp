@@ -60,13 +60,7 @@ void Peer::Init(Instance &aInstance)
     mResolvingHost            = false;
     mTxtDataValidated         = false;
     mSockAddrUpdatedBasedOnRx = false;
-#if OPENTHREAD_CONFIG_TREL_DNSSD_DISCOVERY_STABILIZATION_ENABLE
-    mBrowseRemovePending = false;
-    mResolveEpoch        = 0;
-    mSrvTxtResolveEpoch  = 0;
-    mHostResolveEpoch    = 0;
-#endif
-    mDnssdState = kDnssdResolving;
+    mDnssdState               = kDnssdResolving;
 #else
     mDnssdState = kDnssdResolved;
 #endif

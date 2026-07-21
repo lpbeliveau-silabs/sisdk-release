@@ -278,17 +278,11 @@ private:
     DnssdState mDnssdState;
     UptimeSec  mLastInteractionTime;
 #if OPENTHREAD_CONFIG_TREL_MANAGE_DNSSD_ENABLE
-    bool mExtAddressSet : 1;
-    bool mResolvingService : 1;
-    bool mResolvingHost : 1;
-    bool mTxtDataValidated : 1;
-    bool mSockAddrUpdatedBasedOnRx : 1;
-#if OPENTHREAD_CONFIG_TREL_DNSSD_DISCOVERY_STABILIZATION_ENABLE
-    bool    mBrowseRemovePending : 1;
-    uint8_t mResolveEpoch;
-    uint8_t mSrvTxtResolveEpoch;
-    uint8_t mHostResolveEpoch;
-#endif
+    bool         mExtAddressSet : 1;
+    bool         mResolvingService : 1;
+    bool         mResolvingHost : 1;
+    bool         mTxtDataValidated : 1;
+    bool         mSockAddrUpdatedBasedOnRx : 1;
     uint16_t     mPort;
     Heap::String mServiceName;
     Heap::String mHostName;

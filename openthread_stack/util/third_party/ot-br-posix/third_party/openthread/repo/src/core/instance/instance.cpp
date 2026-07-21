@@ -152,9 +152,19 @@ Instance::Instance(void)
     , mMac(*this)
     , mMessageFramer(*this)
     , mMeshForwarder(*this)
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    , mThreadDirectTxScheduler(*this)
+#endif
     , mMle(*this)
     , mDiscoverScanner(*this)
     , mAddressResolver(*this)
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE || OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_LISTENER_ENABLE
+    , mDirectHandler(*this)
+    , mDirectPeerTable(*this)
+#endif
+#if OPENTHREAD_CONFIG_THREAD_DIRECT_WAKE_INITIATOR_ENABLE
+    , mWakeupTxScheduler(*this)
+#endif
 #if OPENTHREAD_CONFIG_MULTI_RADIO
     , mRadioSelector(*this)
 #endif

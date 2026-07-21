@@ -82,10 +82,6 @@ otbrError Netif::Dependencies::BorderRoutingProcessDhcp6PdPrefix(const otBorderR
 }
 #endif
 
-void Netif::Dependencies::HandleThreadInterfaceIp6UnicastAddressesUpdated(const std::vector<Ip6AddressInfo> &)
-{
-}
-
 OT_TOOL_PACKED_BEGIN
 struct Mldv2Header
 {
@@ -181,8 +177,6 @@ void Netif::UpdateIp6UnicastAddresses(const std::vector<Ip6AddressInfo> &aAddrIn
     }
 
     mIp6UnicastAddresses.assign(aAddrInfos.begin(), aAddrInfos.end());
-
-    mDeps.HandleThreadInterfaceIp6UnicastAddressesUpdated(aAddrInfos);
 }
 
 otbrError Netif::UpdateIp6MulticastAddresses(const std::vector<Ip6Address> &aAddrs)

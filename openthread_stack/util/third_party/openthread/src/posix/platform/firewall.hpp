@@ -33,23 +33,12 @@
 
 #if OPENTHREAD_POSIX_CONFIG_FIREWALL_ENABLE
 
-#include <stddef.h>
-
-struct otInstance;
+#include <openthread/thread.h>
 
 namespace ot {
 namespace Posix {
 
 void UpdateIpSets(otInstance *aInstance);
-
-/**
- * Refreshes only the `otbr-ingress-allow-dst` ipset from caller-supplied `/64` prefix strings (e.g. NCP mode where
- * `UpdateIpSets()` is not driven from Thread Network Data).
- *
- * @param[in] aPrefixes  Array of NUL-terminated strings, each an IPv6 prefix in `xxxx::/64` form.
- * @param[in] aCount     Number of entries in @p aPrefixes.
- */
-void ApplyOtbrIngressAllowDstPrefixes(const char *const *aPrefixes, size_t aCount);
 
 } // namespace Posix
 } // namespace ot
